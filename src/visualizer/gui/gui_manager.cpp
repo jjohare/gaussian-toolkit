@@ -2284,7 +2284,11 @@ namespace lfs::vis::gui {
                 LOG_ERROR("LoadFile: no data loader");
                 return;
             }
-            startAsyncImport(cmd.path, data_loader->getParameters());
+            auto params = data_loader->getParameters();
+            if (!cmd.output_path.empty()) {
+                params.dataset.output_path = cmd.output_path;
+            }
+            startAsyncImport(cmd.path, params);
         });
 
         // Fallback sync import progress handlers

@@ -649,11 +649,11 @@ NB_MODULE(lichtfeld, m) {
 
     m.def(
         "load_file",
-        [](const std::string& path, const bool is_dataset) {
+        [](const std::string& path, const bool is_dataset, const std::string& output_path) {
             nb::gil_scoped_release release;
-            lfs::core::events::cmd::LoadFile{.path = path, .is_dataset = is_dataset}.emit();
+            lfs::core::events::cmd::LoadFile{.path = path, .is_dataset = is_dataset, .output_path = output_path}.emit();
         },
-        nb::arg("path"), nb::arg("is_dataset") = false,
+        nb::arg("path"), nb::arg("is_dataset") = false, nb::arg("output_path") = "",
         "Load a file (PLY, checkpoint) or dataset into the scene.");
 
     m.def(

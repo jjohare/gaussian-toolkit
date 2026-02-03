@@ -95,7 +95,7 @@ class ExitOperator(Operator):
 
 
 def _on_dataset_load(params):
-    lf.load_file(str(params.dataset_path), is_dataset=True)
+    lf.load_file(str(params.dataset_path), is_dataset=True, output_path=str(params.output_path))
 
 
 def _on_checkpoint_load(params):
