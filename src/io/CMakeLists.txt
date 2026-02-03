@@ -271,9 +271,10 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     endif ()
 endif ()
 
-# Export public headers (all interface files in src/io/include/io/)
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/io
-        DESTINATION include)
+if(NOT BUILD_PORTABLE)
+    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/io
+            DESTINATION include)
+endif()
 
 message(STATUS "I/O module configured with SOG support")
 message(STATUS "  IO CUDA library: lfs_io_cuda (morton, k-means)")

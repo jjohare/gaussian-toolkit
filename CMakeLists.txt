@@ -448,8 +448,6 @@ if(WIN32 AND CUDAToolkit_FOUND)
     set(CUDA_RUNTIME_DLLS
         "${CUDAToolkit_BIN_DIR}/cudart64_12.dll"
         "${CUDAToolkit_BIN_DIR}/curand64_10.dll"
-        "${CUDAToolkit_BIN_DIR}/cublas64_12.dll"
-        "${CUDAToolkit_BIN_DIR}/cublasLt64_12.dll"
     )
     foreach(CUDA_DLL ${CUDA_RUNTIME_DLLS})
         if(EXISTS "${CUDA_DLL}")

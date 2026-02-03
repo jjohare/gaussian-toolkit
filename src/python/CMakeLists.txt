@@ -151,7 +151,6 @@ target_link_libraries(lfs_py PRIVATE
     lfs_python_runtime
     OpenImageIO::OpenImageIO
     CUDA::cudart
-    CUDA::cublas
     CUDA::curand
 )
 
@@ -189,8 +188,6 @@ if(WIN32)
     set(CUDA_DLLS_FOR_PYD
         "${CUDAToolkit_BIN_DIR}/cudart64_12.dll"
         "${CUDAToolkit_BIN_DIR}/curand64_10.dll"
-        "${CUDAToolkit_BIN_DIR}/cublas64_12.dll"
-        "${CUDAToolkit_BIN_DIR}/cublasLt64_12.dll"
     )
     foreach(DLL ${CUDA_DLLS_FOR_PYD})
         if(EXISTS "${DLL}")
@@ -405,6 +402,10 @@ if(BUILD_PORTABLE AND BUILD_PYTHON_BINDINGS)
                 PATTERN "idle_test" EXCLUDE
                 PATTERN "tkinter" EXCLUDE
                 PATTERN "turtledemo" EXCLUDE
+                PATTERN "idlelib" EXCLUDE
+                PATTERN "lib2to3" EXCLUDE
+                PATTERN "ensurepip" EXCLUDE
+                PATTERN "unittest" EXCLUDE
             )
             message(STATUS "  Will bundle Python stdlib from: ${VCPKG_PYTHON_STDLIB}")
         else()
@@ -460,6 +461,10 @@ if(BUILD_PORTABLE AND BUILD_PYTHON_BINDINGS)
                 PATTERN "idle_test" EXCLUDE
                 PATTERN "tkinter" EXCLUDE
                 PATTERN "turtledemo" EXCLUDE
+                PATTERN "idlelib" EXCLUDE
+                PATTERN "lib2to3" EXCLUDE
+                PATTERN "ensurepip" EXCLUDE
+                PATTERN "unittest" EXCLUDE
                 PATTERN "lib-dynload" EXCLUDE
             )
 

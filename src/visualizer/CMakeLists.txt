@@ -244,10 +244,10 @@ elseif (UNIX AND NOT APPLE)
     )
 endif ()
 
-# Export only the public header
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/visualizer/visualizer.hpp
-        DESTINATION include/visualizer
-)
+if(NOT BUILD_PORTABLE)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/visualizer/visualizer.hpp
+            DESTINATION include/visualizer)
+endif()
 
 # Optionally install resources
 install(DIRECTORY ${VISUALIZER_SOURCE_RESOURCE_DIR}/
