@@ -26,6 +26,7 @@
 #include "tools/brush_tool.hpp"
 #include "tools/builtin_tools.hpp"
 #include "tools/selection_tool.hpp"
+#include <cassert>
 #include <iostream>
 #include <stdexcept>
 #ifdef WIN32
@@ -417,29 +418,11 @@ namespace lfs::vis {
                 return;
             }
             if (trainer_manager_ && trainer_manager_->isTrainingActive()) {
+                pending_reset_ = true;
                 trainer_manager_->stopTraining();
-                trainer_manager_->waitForCompletion();
-            }
-            const auto& path = scene_manager_->getDatasetPath();
-            const auto& init_path = data_loader_->getParameters().init_path;
-            if (path.empty()) {
-                LOG_ERROR("Cannot reset: empty path");
                 return;
             }
-            // Preserve user-modified params
-            if (auto* const param_mgr = services().paramsOrNull(); param_mgr && param_mgr->ensureLoaded()) {
-                auto params = param_mgr->createForDataset(path, {});
-                if (trainer_manager_) {
-                    params.dataset = trainer_manager_->getEditableDatasetParams();
-                    params.dataset.data_path = path;
-                    params.init_path = init_path;
-                }
-                data_loader_->setParameters(params);
-            }
-            LOG_DEBUG("Resetting: reloading {}", lfs::core::path_to_utf8(path));
-            if (const auto result = data_loader_->loadDataset(path); !result) {
-                LOG_ERROR("Reload failed: {}", result.error());
-            }
+            performReset();
         });
 
         cmd::ClearScene::when([this](const auto&) {
@@ -861,6 +844,12 @@ namespace lfs::vis {
         }
         if (selection_tool_ && selection_tool_->isEnabled() && tool_context_) {
             selection_tool_->update(*tool_context_);
+        }
+
+        if (pending_reset_ && trainer_manager_ && !trainer_manager_->isTrainingActive()) {
+            pending_reset_ = false;
+            trainer_manager_->waitForCompletion();
+            performReset();
         }
 
         // Auto-start training if --train flag was passed
@@ -1303,6 +1292,31 @@ namespace lfs::vis {
 
     void VisualizerImpl::clearScene() {
         data_loader_->clearScene();
+    }
+
+    void VisualizerImpl::performReset() {
+        assert(scene_manager_ && scene_manager_->hasDataset());
+
+        const auto& path = scene_manager_->getDatasetPath();
+        if (path.empty()) {
+            LOG_ERROR("Cannot reset: empty path");
+            return;
+        }
+
+        const auto& init_path = data_loader_->getParameters().init_path;
+        if (auto* const param_mgr = services().paramsOrNull(); param_mgr && param_mgr->ensureLoaded()) {
+            auto params = param_mgr->createForDataset(path, {});
+            if (trainer_manager_) {
+                params.dataset = trainer_manager_->getEditableDatasetParams();
+                params.dataset.data_path = path;
+                params.init_path = init_path;
+            }
+            data_loader_->setParameters(params);
+        }
+
+        if (const auto result = data_loader_->loadDataset(path); !result) {
+            LOG_ERROR("Reset reload failed: {}", result.error());
+        }
     }
 
     void VisualizerImpl::handleLoadFileCommand([[maybe_unused]] const lfs::core::events::cmd::LoadFile& cmd) {

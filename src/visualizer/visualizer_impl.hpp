@@ -155,6 +155,7 @@ namespace lfs::vis {
         void handleLoadFileCommand(const lfs::core::events::cmd::LoadFile& cmd);
         void handleLoadConfigFile(const std::filesystem::path& path);
         void handleSwitchToLatestCheckpoint();
+        void performReset();
 
         // Tool initialization
         void initializeTools();
@@ -208,6 +209,7 @@ namespace lfs::vis {
         bool gui_initialized_ = false;
         bool tools_initialized_ = false;
         bool pending_auto_train_ = false;
+        bool pending_reset_ = false;
     };
 
 } // namespace lfs::vis

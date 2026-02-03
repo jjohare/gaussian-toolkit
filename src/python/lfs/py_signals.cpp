@@ -64,15 +64,20 @@ namespace lfs::python {
             set_signal_value("trainer_state", state);
         }
 
-        void do_trainer_loaded(bool has_trainer, int max_iterations) {
+        void do_trainer_loaded(const bool has_trainer, const int max_iterations) {
             if (!g_initialized) {
                 return;
             }
+
+            g_training = TrainingBuffer{};
 
             nb::gil_scoped_acquire gil;
 
             set_signal_value("has_trainer", has_trainer);
             set_signal_value("max_iterations", max_iterations);
+            set_signal_value("iteration", 0);
+            set_signal_value("loss", 0.0f);
+            set_signal_value("num_gaussians", 0);
         }
 
         void do_psnr(float psnr) {

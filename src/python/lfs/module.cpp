@@ -605,25 +605,43 @@ NB_MODULE(lichtfeld, m) {
         "Get trainer error message");
 
     m.def(
-        "start_training", []() { lfs::core::events::cmd::StartTraining{}.emit(); },
+        "start_training", []() {
+            nb::gil_scoped_release release;
+            lfs::core::events::cmd::StartTraining{}.emit();
+        },
         "Start training with current parameters");
     m.def(
-        "pause_training", []() { lfs::core::events::cmd::PauseTraining{}.emit(); },
+        "pause_training", []() {
+            nb::gil_scoped_release release;
+            lfs::core::events::cmd::PauseTraining{}.emit();
+        },
         "Pause the current training run");
     m.def(
-        "resume_training", []() { lfs::core::events::cmd::ResumeTraining{}.emit(); },
+        "resume_training", []() {
+            nb::gil_scoped_release release;
+            lfs::core::events::cmd::ResumeTraining{}.emit();
+        },
         "Resume a paused training run");
     m.def(
-        "stop_training", []() { lfs::core::events::cmd::StopTraining{}.emit(); },
+        "stop_training", []() {
+            nb::gil_scoped_release release;
+            lfs::core::events::cmd::StopTraining{}.emit();
+        },
         "Stop the current training run");
     m.def(
-        "reset_training", []() { lfs::core::events::cmd::ResetTraining{}.emit(); },
+        "reset_training", []() {
+            nb::gil_scoped_release release;
+            lfs::core::events::cmd::ResetTraining{}.emit();
+        },
         "Reset training state to initial");
     m.def(
         "save_checkpoint", []() { lfs::core::events::cmd::SaveCheckpoint{}.emit(); },
         "Save a training checkpoint to disk");
     m.def(
-        "clear_scene", []() { lfs::core::events::cmd::ClearScene{}.emit(); },
+        "clear_scene", []() {
+            nb::gil_scoped_release release;
+            lfs::core::events::cmd::ClearScene{}.emit();
+        },
         "Remove all nodes from the scene");
     m.def(
         "switch_to_edit_mode", []() { lfs::core::events::cmd::SwitchToEditMode{}.emit(); },
@@ -631,7 +649,8 @@ NB_MODULE(lichtfeld, m) {
 
     m.def(
         "load_file",
-        [](const std::string& path, bool is_dataset) {
+        [](const std::string& path, const bool is_dataset) {
+            nb::gil_scoped_release release;
             lfs::core::events::cmd::LoadFile{.path = path, .is_dataset = is_dataset}.emit();
         },
         nb::arg("path"), nb::arg("is_dataset") = false,
@@ -645,6 +664,7 @@ NB_MODULE(lichtfeld, m) {
     m.def(
         "load_checkpoint_for_training",
         [](const std::string& checkpoint_path, const std::string& dataset_path, const std::string& output_path) {
+            nb::gil_scoped_release release;
             lfs::core::events::cmd::LoadCheckpointForTraining{
                 .checkpoint_path = checkpoint_path,
                 .dataset_path = dataset_path,
