@@ -15,6 +15,7 @@
 #endif
 #include "core/event_bridge/localization_manager.hpp"
 #include "gui/string_keys.hpp"
+#include "gui/ui_widgets.hpp"
 #include "gui/utils/windows_utils.hpp"
 #include "theme/theme.hpp"
 
@@ -241,7 +242,7 @@ namespace lfs::vis::gui {
                 ImGui::Spacing();
             }
 
-            if (ImGui::Button("Install", ImVec2(100 * scale, 0))) {
+            if (widgets::ColoredButton("Install", widgets::ButtonStyle::Success, {100 * scale, 0})) {
                 if (!plugin_install_url_.empty()) {
                     const PyGILState_STATE gil = PyGILState_Ensure();
 
@@ -283,7 +284,7 @@ namespace lfs::vis::gui {
                 }
             }
             ImGui::SameLine();
-            if (ImGui::Button("Cancel", ImVec2(100 * scale, 0))) {
+            if (widgets::ColoredButton("Cancel", widgets::ButtonStyle::Secondary, {100 * scale, 0})) {
                 show_plugin_install_popup_ = false;
             }
         }

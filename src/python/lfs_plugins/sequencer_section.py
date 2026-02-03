@@ -138,7 +138,7 @@ def draw_sequencer_section(layout):
         layout.spacing()
         layout.spacing()
 
-        if layout.button("Cancel", (80, 0)) or lf.ui.is_key_pressed(lf.ui.Key.ESCAPE):
+        if layout.button_styled("Cancel", "secondary", (80, 0)) or lf.ui.is_key_pressed(lf.ui.Key.ESCAPE):
             layout.close_current_popup()
         layout.same_line()
         if layout.button_styled("Delete", "error", (80, 0)):

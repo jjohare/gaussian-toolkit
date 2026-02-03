@@ -170,7 +170,7 @@ class ResumeCheckpointPopup:
             total_width = self.BUTTON_WIDTH * 2 + self.BUTTON_SPACING
             layout.set_cursor_pos_x(layout.get_cursor_pos()[0] + avail_width - total_width)
 
-            if layout.button(tr("common.cancel"), (self.BUTTON_WIDTH, 0)) or lf.ui.is_key_pressed(lf.ui.Key.ESCAPE):
+            if layout.button_styled(tr("common.cancel"), "secondary", (self.BUTTON_WIDTH, 0)) or lf.ui.is_key_pressed(lf.ui.Key.ESCAPE):
                 self._open = False
                 layout.close_current_popup()
 
