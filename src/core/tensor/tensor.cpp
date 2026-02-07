@@ -776,17 +776,14 @@ namespace lfs::core {
             }
         } else if (device_ == Device::CUDA && device == Device::CPU) {
             // API BOUNDARY: Sync before GPU→CPU transfer
-            const cudaStream_t transfer_stream = resolveCUDAStream(stream_);
-            const cudaStream_t dst_stream = resolveCUDAStream(stream);
+            const cudaStream_t copy_stream = stream ? resolveCUDAStream(stream) : resolveCUDAStream(stream_);
 
-            if (stream) {
-                CHECK_CUDA(waitForCUDAStream(dst_stream, transfer_stream));
-                CHECK_CUDA(cudaMemcpyAsync(t.data_, src, bytes(), cudaMemcpyDeviceToHost, dst_stream));
-                // Caller controls synchronization when explicit stream is provided.
-            } else {
-                CHECK_CUDA(waitForCUDAStream(transfer_stream, stream_));
-                CHECK_CUDA(cudaMemcpyAsync(t.data_, src, bytes(), cudaMemcpyDeviceToHost, transfer_stream));
-                CHECK_CUDA(synchronizeCUDAStream(transfer_stream)); // Ensure transfer completes before returning
+            // Preserve the original producer stream (including nullptr/default-stream producer).
+            CHECK_CUDA(waitForCUDAStream(copy_stream, stream_));
+            CHECK_CUDA(cudaMemcpyAsync(t.data_, src, bytes(), cudaMemcpyDeviceToHost, copy_stream));
+
+            if (!stream) {
+                CHECK_CUDA(synchronizeCUDAStream(copy_stream)); // Ensure transfer completes before returning
             }
         }
 

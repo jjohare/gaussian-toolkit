@@ -8,6 +8,7 @@
 #include "core/logger.hpp"
 #include "core/path_utils.hpp"
 #include "core/tensor.hpp"
+#include "core/tensor/internal/cuda_stream_context.hpp"
 #include "cuda/image_format_kernels.cuh"
 
 #include <algorithm>
@@ -573,6 +574,9 @@ namespace lfs::io {
         CUcontext saved_context = nullptr;
         cuCtxGetCurrent(&saved_context);
         cudaSetDevice(0);
+        const cudaStream_t active_stream = static_cast<cudaStream_t>(cuda_stream);
+        lfs::core::CUDAStreamGuard stream_guard(active_stream);
+        (void)stream_guard;
 
         using namespace lfs::core;
         Tensor uint8_tensor;
@@ -695,7 +699,15 @@ namespace lfs::io {
             }
         }
 
-        if (const cudaError_t err = cudaDeviceSynchronize(); err != cudaSuccess) {
+        if (active_stream != nullptr) {
+            if (const cudaError_t err = cudaStreamSynchronize(active_stream); err != cudaSuccess) {
+                if (saved_context) {
+                    cuCtxSetCurrent(saved_context);
+                }
+                throw std::runtime_error(std::string("CUDA stream sync failed: ") + cudaGetErrorString(err));
+            }
+            output_tensor.set_stream(active_stream);
+        } else if (const cudaError_t err = cudaDeviceSynchronize(); err != cudaSuccess) {
             if (saved_context) {
                 cuCtxSetCurrent(saved_context);
             }
@@ -747,6 +759,9 @@ namespace lfs::io {
         CUcontext saved_context = nullptr;
         cuCtxGetCurrent(&saved_context);
         cudaSetDevice(impl_->device_id);
+        const cudaStream_t active_stream = static_cast<cudaStream_t>(cuda_stream);
+        lfs::core::CUDAStreamGuard stream_guard(active_stream);
+        (void)stream_guard;
 
         std::vector<nvimgcodecCodeStream_t> code_streams(batch_size);
         std::vector<nvimgcodecImageInfo_t> image_infos(batch_size);
@@ -868,12 +883,26 @@ namespace lfs::io {
             cuda::launch_uint8_hwc_to_float32_chw(
                 reinterpret_cast<const uint8_t*>(uint8_tensors[i].data_ptr()),
                 reinterpret_cast<float*>(output.data_ptr()),
-                H, W, C, nullptr);
+                H, W, C, active_stream);
 
             results.push_back(std::move(output));
         }
 
-        cudaDeviceSynchronize();
+        if (active_stream != nullptr) {
+            if (const cudaError_t err = cudaStreamSynchronize(active_stream); err != cudaSuccess) {
+                if (saved_context) {
+                    cuCtxSetCurrent(saved_context);
+                }
+                throw std::runtime_error(std::string("CUDA stream sync failed: ") + cudaGetErrorString(err));
+            }
+            for (auto& tensor : results) {
+                if (tensor.is_valid()) {
+                    tensor.set_stream(active_stream);
+                }
+            }
+        } else {
+            cudaDeviceSynchronize();
+        }
         uint8_tensors.clear();
 
         if (saved_context) {
@@ -909,6 +938,9 @@ namespace lfs::io {
         CUcontext saved_context = nullptr;
         cuCtxGetCurrent(&saved_context);
         cudaSetDevice(impl_->device_id);
+        const cudaStream_t active_stream = static_cast<cudaStream_t>(cuda_stream);
+        lfs::core::CUDAStreamGuard stream_guard(active_stream);
+        (void)stream_guard;
 
         std::vector<nvimgcodecCodeStream_t> code_streams(batch_size);
         std::vector<nvimgcodecImageInfo_t> image_infos(batch_size);
@@ -944,7 +976,7 @@ namespace lfs::io {
             const int width = image_infos[i].plane_info[0].width;
             const int height = image_infos[i].plane_info[0].height;
 
-            uint8_tensors[i] = Tensor::zeros(
+            uint8_tensors[i] = Tensor::empty(
                 TensorShape({static_cast<size_t>(height), static_cast<size_t>(width), 3}),
                 Device::CUDA,
                 DataType::UInt8);
@@ -1032,12 +1064,26 @@ namespace lfs::io {
             cuda::launch_uint8_hwc_to_float32_chw(
                 reinterpret_cast<const uint8_t*>(uint8_tensors[i].data_ptr()),
                 reinterpret_cast<float*>(output.data_ptr()),
-                H, W, C, nullptr);
+                H, W, C, active_stream);
 
             results.push_back(std::move(output));
         }
 
-        cudaDeviceSynchronize();
+        if (active_stream != nullptr) {
+            if (const cudaError_t err = cudaStreamSynchronize(active_stream); err != cudaSuccess) {
+                if (saved_context) {
+                    cuCtxSetCurrent(saved_context);
+                }
+                throw std::runtime_error(std::string("CUDA stream sync failed: ") + cudaGetErrorString(err));
+            }
+            for (auto& tensor : results) {
+                if (tensor.is_valid()) {
+                    tensor.set_stream(active_stream);
+                }
+            }
+        } else {
+            cudaDeviceSynchronize();
+        }
         uint8_tensors.clear();
 
         if (saved_context) {

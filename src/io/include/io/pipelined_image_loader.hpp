@@ -76,7 +76,8 @@ namespace lfs::io {
         size_t sequence_id;
         lfs::core::Tensor tensor;              // Image tensor [C,H,W], float32
         std::optional<lfs::core::Tensor> mask; // Optional mask [H,W], float32
-        cudaStream_t stream = nullptr;
+        cudaStream_t image_stream = nullptr;
+        cudaStream_t mask_stream = nullptr;
     };
 
     class LFS_IO_API PipelinedImageLoader {
@@ -150,7 +151,8 @@ namespace lfs::io {
         struct PendingPair {
             std::optional<lfs::core::Tensor> image;
             std::optional<lfs::core::Tensor> mask;
-            cudaStream_t stream = nullptr;
+            cudaStream_t image_stream = nullptr;
+            cudaStream_t mask_stream = nullptr;
             bool mask_expected = false; // True if a mask was requested for this sequence_id
         };
 
@@ -245,7 +247,8 @@ namespace lfs::io {
             size_t sequence_id,
             std::optional<lfs::core::Tensor> image,
             std::optional<lfs::core::Tensor> mask,
-            cudaStream_t stream);
+            cudaStream_t image_stream = nullptr,
+            cudaStream_t mask_stream = nullptr);
 
         PipelinedLoaderConfig config_;
         std::atomic<bool> running_{false};

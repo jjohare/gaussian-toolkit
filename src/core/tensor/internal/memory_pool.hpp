@@ -69,7 +69,7 @@ namespace lfs::core {
             }
 
             if (bytes <= BUCKET_ALLOC_THRESHOLD) {
-                ptr = SizeBucketedPool::instance().try_allocate_cached(bytes);
+                ptr = SizeBucketedPool::instance().try_allocate_cached(bytes, stream);
                 if (ptr) {
                     stats_.bucket_cache_hits.fetch_add(1, std::memory_order_relaxed);
                     stats_.bucket_bytes.fetch_add(bytes, std::memory_order_relaxed);
@@ -142,7 +142,7 @@ namespace lfs::core {
                     GPUSlabAllocator::instance().deallocate(ptr, size);
                     return;
                 case AllocMethod::Bucketed:
-                    SizeBucketedPool::instance().cache_free(ptr, size);
+                    SizeBucketedPool::instance().cache_free(ptr, size, getCurrentCUDAStream());
                     return;
                 case AllocMethod::Direct:
                     cudaFree(ptr);
@@ -185,7 +185,7 @@ namespace lfs::core {
                 size_t size;
                 if (lookup_allocation(ptr, method, size) && method == AllocMethod::Bucketed) {
                     untrack_allocation(ptr);
-                    SizeBucketedPool::instance().cache_free(ptr, size);
+                    SizeBucketedPool::instance().cache_free(ptr, size, getCurrentCUDAStream());
                     return;
                 }
             }

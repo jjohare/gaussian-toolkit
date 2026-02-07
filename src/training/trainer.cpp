@@ -16,6 +16,7 @@
 #include "core/logger.hpp"
 #include "core/path_utils.hpp"
 #include "core/splat_data_transform.hpp"
+#include "core/tensor/internal/cuda_stream_context.hpp"
 #include "core/tensor/internal/memory_pool.hpp"
 #include "io/cache_image_loader.hpp"
 #include "io/exporter.hpp"
@@ -1803,9 +1804,31 @@ namespace lfs::training {
                 auto& example = *example_opt;
                 cam = example.data.camera;
                 gt_image = std::move(example.data.image);
+                // Explicit producer->consumer handoff: loader may decode on a non-default stream.
+                if (gt_image.device() == lfs::core::Device::CUDA) {
+                    const cudaStream_t consumer_stream = lfs::core::resolveCUDAStream();
+                    const cudaStream_t producer_stream = gt_image.stream();
+                    if (const auto err = lfs::core::waitForCUDAStream(consumer_stream, producer_stream);
+                        err != cudaSuccess) {
+                        return std::unexpected(std::format(
+                            "Failed to wait for GT image stream dependency: {}", cudaGetErrorString(err)));
+                    }
+                    gt_image.set_stream(consumer_stream);
+                }
 
                 // Store pipelined mask for use in train_step
                 pipelined_mask_ = example.mask.has_value() ? std::move(*example.mask) : lfs::core::Tensor();
+                if (pipelined_mask_.is_valid() &&
+                    pipelined_mask_.device() == lfs::core::Device::CUDA) {
+                    const cudaStream_t consumer_stream = lfs::core::resolveCUDAStream();
+                    const cudaStream_t mask_stream = pipelined_mask_.stream();
+                    if (const auto err = lfs::core::waitForCUDAStream(consumer_stream, mask_stream);
+                        err != cudaSuccess) {
+                        return std::unexpected(std::format(
+                            "Failed to wait for mask stream dependency: {}", cudaGetErrorString(err)));
+                    }
+                    pipelined_mask_.set_stream(consumer_stream);
+                }
 
                 auto step_result = train_step(iter, cam, gt_image, render_mode, stop_token);
                 if (!step_result) {

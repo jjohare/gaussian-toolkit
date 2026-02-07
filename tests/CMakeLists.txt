@@ -367,9 +367,9 @@ target_compile_definitions(lichtfeld_benchmarks PRIVATE
 )
 
 target_link_libraries(lichtfeld_benchmarks PRIVATE
-    lfs_visualizer
-    lfs_rendering
     lfs_training
+    lfs_rendering
+    lfs_visualizer
     lfs_core
     lfs_geometry
     lfs_io

@@ -153,6 +153,7 @@ namespace lfs::training {
         CameraWithImage data;
         lfs::core::Tensor target;              // Empty tensor, not used
         std::optional<lfs::core::Tensor> mask; // Optional mask [H,W], float32
+        cudaStream_t stream = nullptr;         // Legacy shared stream (image/mask keep their own stream metadata)
     };
 
     /// Camera dataset configuration
@@ -224,7 +225,9 @@ namespace lfs::training {
 
             return {
                 {cam.get(), std::move(image)},
-                lfs::core::Tensor() // Empty target
+                lfs::core::Tensor(), // Empty target
+                std::nullopt,
+                nullptr
             };
         }
 
@@ -558,7 +561,8 @@ namespace lfs::training {
                 CameraExample example{
                     CameraWithImage{cam.get(), std::move(ready.tensor)},
                     lfs::core::Tensor(),
-                    std::nullopt};
+                    std::nullopt,
+                    ready.image_stream};
 
                 // Attach mask if present
                 if (ready.mask && ready.mask->is_valid()) {

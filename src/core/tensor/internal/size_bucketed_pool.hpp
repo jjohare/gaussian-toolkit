@@ -4,6 +4,7 @@
 #pragma once
 
 #include "core/logger.hpp"
+#include "cuda_stream_context.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -75,29 +76,32 @@ namespace lfs::core {
             return std::min(idx, NUM_BUCKETS - 1);
         }
 
-        void* try_allocate_cached(size_t bytes) {
+        void* try_allocate_cached(size_t bytes, cudaStream_t consumer_stream = nullptr) {
             const size_t bucket_size = get_bucket_size(bytes);
             const size_t bucket_idx = get_bucket_index(bucket_size);
             if (bucket_idx >= NUM_BUCKETS)
                 return nullptr;
 
+            CachedBlock block;
             {
                 std::lock_guard<std::mutex> lock(buckets_[bucket_idx].mutex);
                 if (!buckets_[bucket_idx].cache.empty()) {
-                    void* ptr = buckets_[bucket_idx].cache.back();
+                    block = buckets_[bucket_idx].cache.back();
                     buckets_[bucket_idx].cache.pop_back();
                     buckets_[bucket_idx].cached_bytes -= bucket_size;
                     stats_.cache_hits.fetch_add(1, std::memory_order_relaxed);
                     stats_.bytes_cached.fetch_sub(bucket_size, std::memory_order_relaxed);
                     stats_.bytes_wasted.fetch_add(bucket_size - bytes, std::memory_order_relaxed);
-                    return ptr;
+                } else {
+                    stats_.cache_misses.fetch_add(1, std::memory_order_relaxed);
+                    return nullptr;
                 }
             }
-            stats_.cache_misses.fetch_add(1, std::memory_order_relaxed);
-            return nullptr;
+            waitForCUDAStream(consumer_stream, block.stream);
+            return block.ptr;
         }
 
-        bool cache_free(void* ptr, size_t bytes) {
+        bool cache_free(void* ptr, size_t bytes, cudaStream_t producer_stream = nullptr) {
             const size_t bucket_size = get_bucket_size(bytes);
             const size_t bucket_idx = get_bucket_index(bucket_size);
             if (bucket_idx >= NUM_BUCKETS)
@@ -105,13 +109,13 @@ namespace lfs::core {
 
             std::lock_guard<std::mutex> lock(buckets_[bucket_idx].mutex);
             if (buckets_[bucket_idx].cache.size() >= CACHE_SIZE_PER_BUCKET) {
-                void* old_ptr = buckets_[bucket_idx].cache.front();
+                CachedBlock evicted = buckets_[bucket_idx].cache.front();
                 buckets_[bucket_idx].cache.erase(buckets_[bucket_idx].cache.begin());
                 buckets_[bucket_idx].cached_bytes -= bucket_size;
                 stats_.bytes_cached.fetch_sub(bucket_size, std::memory_order_relaxed);
-                cudaFreeAsync(old_ptr, nullptr);
+                cudaFreeAsync(evicted.ptr, evicted.stream);
             }
-            buckets_[bucket_idx].cache.push_back(ptr);
+            buckets_[bucket_idx].cache.push_back({ptr, producer_stream});
             buckets_[bucket_idx].cached_bytes += bucket_size;
             stats_.free_count.fetch_add(1, std::memory_order_relaxed);
             stats_.bytes_cached.fetch_add(bucket_size, std::memory_order_relaxed);
@@ -119,7 +123,7 @@ namespace lfs::core {
         }
 
         void* allocate(size_t bytes, cudaStream_t stream = nullptr) {
-            void* ptr = try_allocate_cached(bytes);
+            void* ptr = try_allocate_cached(bytes, stream);
             if (ptr)
                 return ptr;
 
@@ -142,7 +146,7 @@ namespace lfs::core {
         void deallocate(void* ptr, size_t bytes, cudaStream_t stream = nullptr) {
             if (!ptr)
                 return;
-            if (!cache_free(ptr, bytes)) {
+            if (!cache_free(ptr, bytes, stream)) {
                 cudaFreeAsync(ptr, stream);
             }
         }
@@ -150,8 +154,8 @@ namespace lfs::core {
         void trim_cache() {
             for (size_t i = 0; i < NUM_BUCKETS; ++i) {
                 std::lock_guard<std::mutex> lock(buckets_[i].mutex);
-                for (void* ptr : buckets_[i].cache) {
-                    cudaFree(ptr);
+                for (auto& block : buckets_[i].cache) {
+                    cudaFree(block.ptr);
                 }
                 buckets_[i].cache.clear();
                 buckets_[i].cached_bytes = 0;
@@ -183,8 +187,13 @@ namespace lfs::core {
         SizeBucketedPool& operator=(const SizeBucketedPool&) = delete;
 
     private:
+        struct CachedBlock {
+            void* ptr;
+            cudaStream_t stream;
+        };
+
         struct Bucket {
-            std::vector<void*> cache;
+            std::vector<CachedBlock> cache;
             std::mutex mutex;
             size_t cached_bytes{0};
 
