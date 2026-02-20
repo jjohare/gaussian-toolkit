@@ -41,7 +41,7 @@ namespace lichtfeld::Strings {
             inline constexpr const char* GETTING_STARTED = "menu.help.getting_started";
             inline constexpr const char* ABOUT = "menu.help.about";
         } // namespace Help
-    } // namespace Menu
+    }     // namespace Menu
 
     namespace Window {
         inline constexpr const char* GETTING_STARTED = "window.getting_started";
@@ -101,7 +101,7 @@ namespace lichtfeld::Strings {
             inline constexpr const char* ENABLED = "about.interop.enabled";
             inline constexpr const char* DISABLED = "about.interop.disabled";
         } // namespace Interop
-    } // namespace About
+    }     // namespace About
 
     namespace Training {
         namespace Section {
@@ -290,7 +290,7 @@ namespace lichtfeld::Strings {
             inline constexpr const char* ADD = "training.button.add";
             inline constexpr const char* REMOVE = "training.button.remove";
         } // namespace Button
-    } // namespace Training
+    }     // namespace Training
 
     namespace Scene {
         inline constexpr const char* ADD_PLY = "scene.add_ply";
@@ -954,5 +954,17 @@ namespace lichtfeld::Strings {
         inline constexpr const char* RETRY = "disk_space_dialog.retry";
         inline constexpr const char* SELECT_OUTPUT_LOCATION = "disk_space_dialog.select_output_location";
     } // namespace DiskSpaceDialog
+
+    namespace FrameShare {
+        inline constexpr const char* TITLE = "frame_share.title";
+        inline constexpr const char* ENABLE = "frame_share.enable";
+        inline constexpr const char* BACKEND = "frame_share.backend";
+        inline constexpr const char* SENDER_NAME = "frame_share.sender_name";
+        inline constexpr const char* STATUS = "frame_share.status";
+        inline constexpr const char* ACTIVE = "frame_share.active";
+        inline constexpr const char* INACTIVE = "frame_share.inactive";
+        inline constexpr const char* RECEIVERS = "frame_share.receivers";
+        inline constexpr const char* ERROR_STATE = "frame_share.error";
+    } // namespace FrameShare
 
 } // namespace lichtfeld::Strings

@@ -848,5 +848,16 @@
     "edit_focal_length": "编辑焦距...",
     "edit_focal_length_title": "编辑焦距",
     "focal_length_mm": "焦距 (mm)"
+  },
+  "frame_share": {
+    "title": "帧共享",
+    "enable": "启用",
+    "backend": "后端",
+    "sender_name": "发送者名称",
+    "status": "状态",
+    "active": "活跃",
+    "inactive": "未活跃",
+    "receivers": "接收者",
+    "error": "错误"
   }
 }

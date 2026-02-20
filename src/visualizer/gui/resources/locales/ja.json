@@ -848,5 +848,16 @@
     "edit_focal_length": "焦点距離を編集...",
     "edit_focal_length_title": "焦点距離を編集",
     "focal_length_mm": "焦点距離 (mm)"
+  },
+  "frame_share": {
+    "title": "フレーム共有",
+    "enable": "有効",
+    "backend": "バックエンド",
+    "sender_name": "送信者名",
+    "status": "ステータス",
+    "active": "アクティブ",
+    "inactive": "非アクティブ",
+    "receivers": "受信者",
+    "error": "エラー"
   }
 }

@@ -10,6 +10,7 @@
 #include "core/path_utils.hpp"
 #include "core/splat_data.hpp"
 #include "core/tensor/internal/memory_pool.hpp"
+#include "frame_share/frame_share_manager.hpp"
 #include "geometry/euclidean_transform.hpp"
 #include "rendering/cuda_kernels.hpp"
 #include "rendering/rasterizer/rasterization/include/rasterization_api_tensor.h"
@@ -1168,6 +1169,12 @@ namespace lfs::vis {
                 engine_->compositeMeshAndSplat(cached_result_, display_size);
             }
 
+            if (frame_share_manager_ && frame_share_manager_->isEnabled()) {
+                frame_share_manager_->onFrameFromViewport(
+                    viewport_pos.x, viewport_pos.y,
+                    display_size.x, display_size.y);
+            }
+
             renderOverlays(context);
         }
 
@@ -1191,6 +1198,13 @@ namespace lfs::vis {
             render_size = glm::ivec2(
                 static_cast<int>(context.viewport_region->width),
                 static_cast<int>(context.viewport_region->height));
+        }
+        glm::ivec2 viewport_pos(0, 0);
+        if (context.viewport_region) {
+            const int gl_y = context.viewport.frameBufferSize.y -
+                             static_cast<int>(context.viewport_region->y) -
+                             static_cast<int>(context.viewport_region->height);
+            viewport_pos = glm::ivec2(static_cast<int>(context.viewport_region->x), gl_y);
         }
 
         glClearColor(settings_.background_color.r, settings_.background_color.g,
@@ -1228,6 +1242,12 @@ namespace lfs::vis {
                 cached_result_size_ = {0, 0};
             }
 
+            if (result && frame_share_manager_ && frame_share_manager_->isEnabled()) {
+                frame_share_manager_->onFrameFromViewport(
+                    viewport_pos.x, viewport_pos.y,
+                    render_size.x, render_size.y);
+            }
+
             renderOverlays(context);
             if (count_frame) {
                 framerate_controller_.endFrame();
@@ -1251,12 +1271,6 @@ namespace lfs::vis {
             renderToTexture(context, scene_manager, model);
 
             if (render_texture_valid_ && cached_result_size_.x > 0 && cached_result_size_.y > 0) {
-                glm::ivec2 viewport_pos(0, 0);
-                if (context.viewport_region) {
-                    const int gl_y = context.viewport.frameBufferSize.y - static_cast<int>(context.viewport_region->y) - static_cast<int>(context.viewport_region->height);
-                    viewport_pos = glm::ivec2(static_cast<int>(context.viewport_region->x), gl_y);
-                }
-
                 glViewport(viewport_pos.x, viewport_pos.y, render_size.x, render_size.y);
                 glClearColor(settings_.background_color.r, settings_.background_color.g,
                              settings_.background_color.b, 1.0f);
@@ -1426,12 +1440,6 @@ namespace lfs::vis {
                         actual_image_size = glm::ivec2(img.size(2), img.size(1)); // [C, H, W] -> (W, H)
                     }
 
-                    glm::ivec2 viewport_pos(0, 0);
-                    if (context.viewport_region) {
-                        const int gl_y = context.viewport.frameBufferSize.y - static_cast<int>(context.viewport_region->y) - static_cast<int>(context.viewport_region->height);
-                        viewport_pos = glm::ivec2(static_cast<int>(context.viewport_region->x), gl_y);
-                    }
-
                     glViewport(viewport_pos.x, viewport_pos.y, render_size.x, render_size.y);
                     glClearColor(settings_.background_color.r, settings_.background_color.g,
                                  settings_.background_color.b, 1.0f);
@@ -1499,15 +1507,7 @@ namespace lfs::vis {
                 }
 
                 if (engine_->hasMeshRender()) {
-                    glm::ivec2 mesh_pos(0, 0);
-                    if (context.viewport_region) {
-                        const int gl_y = context.viewport.frameBufferSize.y -
-                                         static_cast<int>(context.viewport_region->y) -
-                                         static_cast<int>(context.viewport_region->height);
-                        mesh_pos = glm::ivec2(static_cast<int>(context.viewport_region->x), gl_y);
-                    }
-
-                    glViewport(mesh_pos.x, mesh_pos.y, render_size.x, render_size.y);
+                    glViewport(viewport_pos.x, viewport_pos.y, render_size.x, render_size.y);
 
                     if (splats_presented) {
                         const auto composite_result = engine_->compositeMeshAndSplat(
@@ -1525,6 +1525,13 @@ namespace lfs::vis {
                     }
                 }
             }
+        }
+
+        const bool frame_presented = splats_presented || (engine_ && engine_->hasMeshRender());
+        if (frame_presented && frame_share_manager_ && frame_share_manager_->isEnabled()) {
+            frame_share_manager_->onFrameFromViewport(
+                viewport_pos.x, viewport_pos.y,
+                render_size.x, render_size.y);
         }
 
         // Always render overlays

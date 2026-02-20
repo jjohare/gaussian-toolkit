@@ -859,5 +859,16 @@
     "edit_focal_length": "Edit Focal Length...",
     "edit_focal_length_title": "Edit Focal Length",
     "focal_length_mm": "Focal Length (mm)"
+  },
+  "frame_share": {
+    "title": "Frame Share",
+    "enable": "Enable",
+    "backend": "Backend",
+    "sender_name": "Sender Name",
+    "status": "Status",
+    "active": "Active",
+    "inactive": "Inactive",
+    "receivers": "Receiver(s)",
+    "error": "Error"
   }
 }

@@ -848,5 +848,16 @@
     "edit_focal_length": "Editar distancia focal...",
     "edit_focal_length_title": "Editar distancia focal",
     "focal_length_mm": "Distancia focal (mm)"
+  },
+  "frame_share": {
+    "title": "Compartir frame",
+    "enable": "Activar",
+    "backend": "Backend",
+    "sender_name": "Nombre del emisor",
+    "status": "Estado",
+    "active": "Activo",
+    "inactive": "Inactivo",
+    "receivers": "Receptor(es)",
+    "error": "Error"
   }
 }

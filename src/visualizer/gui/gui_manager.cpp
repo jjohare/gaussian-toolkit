@@ -18,6 +18,7 @@
 #include "gui/editor/python_editor.hpp"
 #include "gui/native_panels.hpp"
 #include "gui/panel_registry.hpp"
+#include "gui/panels/frame_share_panel.hpp"
 #include "gui/panels/mesh2splat_panel.hpp"
 #include "gui/panels/python_console_panel.hpp"
 #include "gui/string_keys.hpp"
@@ -494,6 +495,10 @@ namespace lfs::vis::gui {
                   make_panel(panels::Mesh2SplatPanel(viewer_)),
                   PanelSpace::Floating, 12, 0, 400.0f);
         reg.set_panel_enabled("native.mesh2splat", false);
+
+        reg_panel("native.frame_share", "Frame Share",
+                  make_panel(panels::FrameSharePanel(viewer_->getFrameShareManager())),
+                  PanelSpace::SidePanel, 20);
 
         // Viewport overlays (ordered by draw priority)
         reg_panel("native.selection_overlay", "Selection Overlay",

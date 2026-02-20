@@ -848,5 +848,16 @@
     "edit_focal_length": "초점 거리 편집...",
     "edit_focal_length_title": "초점 거리 편집",
     "focal_length_mm": "초점 거리 (mm)"
+  },
+  "frame_share": {
+    "title": "프레임 공유",
+    "enable": "활성화",
+    "backend": "백엔드",
+    "sender_name": "전송자 이름",
+    "status": "상태",
+    "active": "활성",
+    "inactive": "비활성",
+    "receivers": "수신자",
+    "error": "오류"
   }
 }

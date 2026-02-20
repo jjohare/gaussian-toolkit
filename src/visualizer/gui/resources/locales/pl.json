@@ -848,5 +848,16 @@
     "edit_focal_length": "Edytuj ogniskową...",
     "edit_focal_length_title": "Edytuj ogniskową",
     "focal_length_mm": "Ogniskowa (mm)"
+  },
+  "frame_share": {
+    "title": "Udostępnianie klatek",
+    "enable": "Włącz",
+    "backend": "Backend",
+    "sender_name": "Nazwa nadawcy",
+    "status": "Status",
+    "active": "Aktywne",
+    "inactive": "Nieaktywne",
+    "receivers": "Odbiorcy",
+    "error": "Błąd"
   }
 }

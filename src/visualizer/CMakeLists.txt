@@ -125,8 +125,15 @@ add_library(lfs_visualizer ${LFS_VIS_LIB_TYPE}
 
         gui/panels/menu_bar.cpp
         gui/panels/menu_bar.hpp
+        gui/panels/frame_share_panel.cpp
         gui/utils/windows_utils.cpp
         gui/utils/drag_drop_native.cpp
+
+        # Frame sharing
+        frame_share/frame_share_manager.cpp
+        frame_share/shm_sink.cpp
+        frame_share/spout_sink.cpp
+        frame_share/v4l2_sink.cpp
 )
 
 # Set include directories
@@ -272,6 +279,7 @@ elseif (UNIX AND NOT APPLE)
             GLU
             X11
             util  # PTY support (forkpty)
+            rt    # POSIX shared memory (shm_open)
     )
 endif ()
 

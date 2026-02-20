@@ -20,6 +20,7 @@
 
 namespace lfs::vis {
     class SceneManager;
+    class FrameShareManager;
 } // namespace lfs::vis
 
 namespace lfs::vis {
@@ -339,6 +340,9 @@ namespace lfs::vis {
         // Access to rendering engine (for initialization only)
         lfs::rendering::RenderingEngine* getRenderingEngine();
 
+        // Frame sharing
+        void setFrameShareManager(FrameShareManager* mgr) { frame_share_manager_ = mgr; }
+
         // Camera frustum picking
         int pickCameraFrustum(const glm::vec2& mouse_pos);
         void setHoveredCameraId(int cam_id) { hovered_camera_id_ = cam_id; }
@@ -558,6 +562,8 @@ namespace lfs::vis {
         // Gizmo state for wireframe sync
         bool cropbox_gizmo_active_ = false;
         bool ellipsoid_gizmo_active_ = false;
+
+        FrameShareManager* frame_share_manager_ = nullptr;
         glm::vec3 pending_cropbox_min_{0.0f};
         glm::vec3 pending_cropbox_max_{0.0f};
         glm::mat4 pending_cropbox_transform_{1.0f};

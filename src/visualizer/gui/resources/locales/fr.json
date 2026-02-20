@@ -848,5 +848,16 @@
     "edit_focal_length": "Modifier la longueur focale...",
     "edit_focal_length_title": "Modifier la longueur focale",
     "focal_length_mm": "Longueur focale (mm)"
+  },
+  "frame_share": {
+    "title": "Partage d'image",
+    "enable": "Activer",
+    "backend": "Backend",
+    "sender_name": "Nom de l'émetteur",
+    "status": "Statut",
+    "active": "Actif",
+    "inactive": "Inactif",
+    "receivers": "Récepteur(s)",
+    "error": "Erreur"
   }
 }

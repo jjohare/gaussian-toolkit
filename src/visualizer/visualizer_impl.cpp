@@ -56,8 +56,12 @@ namespace lfs::vis {
         // Create support components
         gui_manager_ = std::make_unique<gui::GuiManager>(this);
 
+        // Create frame share manager before rendering (destroyed after due to declaration order)
+        frame_share_manager_ = std::make_unique<FrameShareManager>();
+
         // Create rendering manager with initial antialiasing setting
         rendering_manager_ = std::make_unique<RenderingManager>();
+        rendering_manager_->setFrameShareManager(frame_share_manager_.get());
 
         // Set initial antialiasing
         RenderSettings initial_settings;

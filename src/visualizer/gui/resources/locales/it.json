@@ -848,5 +848,16 @@
     "edit_focal_length": "Modifica lunghezza focale...",
     "edit_focal_length_title": "Modifica lunghezza focale",
     "focal_length_mm": "Lunghezza focale (mm)"
+  },
+  "frame_share": {
+    "title": "Condivisione frame",
+    "enable": "Attiva",
+    "backend": "Backend",
+    "sender_name": "Nome mittente",
+    "status": "Stato",
+    "active": "Attivo",
+    "inactive": "Inattivo",
+    "receivers": "Ricevitore/i",
+    "error": "Errore"
   }
 }

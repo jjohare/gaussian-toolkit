@@ -848,5 +848,16 @@
     "edit_focal_length": "Brennweite bearbeiten...",
     "edit_focal_length_title": "Brennweite bearbeiten",
     "focal_length_mm": "Brennweite (mm)"
+  },
+  "frame_share": {
+    "title": "Frame-Sharing",
+    "enable": "Aktivieren",
+    "backend": "Backend",
+    "sender_name": "Sendername",
+    "status": "Status",
+    "active": "Aktiv",
+    "inactive": "Inaktiv",
+    "receivers": "Empfänger",
+    "error": "Fehler"
   }
 }
