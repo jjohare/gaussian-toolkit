@@ -55,6 +55,7 @@ namespace lfs::vis {
 
         if (enabled_) {
             next_retry_time_ = std::chrono::steady_clock::now();
+            retry_backoff_seconds_ = 1;
             createSink(last_width_, last_height_);
         } else {
             destroySink();
@@ -215,15 +216,19 @@ namespace lfs::vis {
                 sink_width_ = width;
                 sink_height_ = height;
                 status_message_ = "Active";
+                retry_backoff_seconds_ = 1;
                 LOG_INFO("Frame share started: backend={}, name='{}'",
                          static_cast<int>(backend_), sender_name_);
             } else {
                 status_message_ = "Failed to start";
-                LOG_ERROR("Frame share failed to start");
+                if (retry_backoff_seconds_ <= 1) {
+                    LOG_ERROR("Frame share failed to start (retrying with backoff)");
+                }
                 sink_.reset();
                 sink_width_ = 0;
                 sink_height_ = 0;
-                next_retry_time_ = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+                next_retry_time_ = std::chrono::steady_clock::now() + std::chrono::seconds(retry_backoff_seconds_);
+                retry_backoff_seconds_ = std::min(retry_backoff_seconds_ * 2, 30);
             }
         }
     }

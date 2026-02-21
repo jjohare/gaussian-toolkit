@@ -20,6 +20,7 @@
 #include "tools/tool_base.hpp"
 #include "training/training_manager.hpp"
 #include "visualizer/visualizer.hpp"
+#include "webcam/webcam_manager.hpp"
 #include "window/window_manager.hpp"
 #include <condition_variable>
 #include <memory>
@@ -67,6 +68,7 @@ namespace lfs::vis {
         WindowManager* getWindowManager() { return window_manager_.get(); }
         RenderingManager* getRenderingManager() { return rendering_manager_.get(); }
         FrameShareManager* getFrameShareManager() { return frame_share_manager_.get(); }
+        WebcamManager* getWebcamManager() { return webcam_manager_.get(); }
         gui::GuiManager* getGuiManager() { return gui_manager_.get(); }
         const Viewport& getViewport() const { return viewport_; }
         Viewport& getViewport() { return viewport_; }
@@ -162,6 +164,7 @@ namespace lfs::vis {
         std::unique_ptr<WindowManager> window_manager_;
         std::unique_ptr<InputController> input_controller_;
         std::unique_ptr<FrameShareManager> frame_share_manager_;
+        std::unique_ptr<WebcamManager> webcam_manager_;
         std::unique_ptr<RenderingManager> rendering_manager_;
         std::unique_ptr<SceneManager> scene_manager_;
         std::shared_ptr<TrainerManager> trainer_manager_;

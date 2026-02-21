@@ -78,6 +78,7 @@ namespace lfs::vis {
         int sink_width_ = 0;
         int sink_height_ = 0;
         std::chrono::steady_clock::time_point next_retry_time_{};
+        int retry_backoff_seconds_ = 1;
         float target_fps_ = 0.0f;
         std::chrono::steady_clock::time_point last_frame_time_{};
         unsigned int capture_texture_ = 0;

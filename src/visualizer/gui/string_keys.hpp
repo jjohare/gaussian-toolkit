@@ -969,4 +969,23 @@ namespace lichtfeld::Strings {
         inline constexpr const char* OUTPUT_RESOLUTION = "frame_share.output_resolution";
     } // namespace FrameShare
 
+    namespace Webcam {
+        inline constexpr const char* TITLE = "webcam.title";
+        inline constexpr const char* ENABLE = "webcam.enable";
+        inline constexpr const char* DEVICE = "webcam.device";
+        inline constexpr const char* RESOLUTION = "webcam.resolution";
+        inline constexpr const char* MODE = "webcam.mode";
+        inline constexpr const char* POSITION = "webcam.position";
+        inline constexpr const char* ROTATION = "webcam.rotation";
+        inline constexpr const char* SCALE = "webcam.scale";
+        inline constexpr const char* OPACITY = "webcam.opacity";
+        inline constexpr const char* STATUS = "webcam.status";
+        inline constexpr const char* CAPTURING = "webcam.capturing";
+        inline constexpr const char* DISCONNECTED = "webcam.disconnected";
+        inline constexpr const char* NO_DEVICE = "webcam.no_device";
+        inline constexpr const char* INACTIVE = "webcam.inactive";
+        inline constexpr const char* FACE_CAMERA = "webcam.face_camera";
+        inline constexpr const char* FIXED = "webcam.fixed";
+    } // namespace Webcam
+
 } // namespace lichtfeld::Strings

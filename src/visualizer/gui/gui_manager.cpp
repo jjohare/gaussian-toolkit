@@ -21,6 +21,7 @@
 #include "gui/panels/frame_share_panel.hpp"
 #include "gui/panels/mesh2splat_panel.hpp"
 #include "gui/panels/python_console_panel.hpp"
+#include "gui/panels/webcam_panel.hpp"
 #include "gui/string_keys.hpp"
 #include "gui/ui_widgets.hpp"
 #include "gui/utils/windows_utils.hpp"
@@ -499,6 +500,10 @@ namespace lfs::vis::gui {
         reg_panel("native.frame_share", "Frame Share",
                   make_panel(panels::FrameSharePanel(viewer_->getFrameShareManager())),
                   PanelSpace::SidePanel, 20);
+
+        reg_panel("native.webcam", "Webcam",
+                  make_panel(panels::WebcamPanel(viewer_->getWebcamManager())),
+                  PanelSpace::SidePanel, 21);
 
         // Viewport overlays (ordered by draw priority)
         reg_panel("native.selection_overlay", "Selection Overlay",

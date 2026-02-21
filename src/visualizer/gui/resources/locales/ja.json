@@ -861,5 +861,23 @@
     "error": "エラー",
     "fps_limit": "FPS制限",
     "output_resolution": "出力解像度"
+  },
+  "webcam": {
+    "title": "ウェブカメラ",
+    "enable": "有効",
+    "device": "デバイス",
+    "resolution": "解像度",
+    "mode": "モード",
+    "position": "位置",
+    "rotation": "回転",
+    "scale": "スケール",
+    "opacity": "不透明度",
+    "status": "ステータス",
+    "capturing": "キャプチャ中",
+    "disconnected": "切断",
+    "no_device": "デバイスなし",
+    "inactive": "無効",
+    "face_camera": "カメラに向く",
+    "fixed": "固定"
   }
 }

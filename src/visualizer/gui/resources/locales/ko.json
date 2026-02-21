@@ -861,5 +861,23 @@
     "error": "오류",
     "fps_limit": "FPS 제한",
     "output_resolution": "출력 해상도"
+  },
+  "webcam": {
+    "title": "웹캠",
+    "enable": "활성화",
+    "device": "장치",
+    "resolution": "해상도",
+    "mode": "모드",
+    "position": "위치",
+    "rotation": "회전",
+    "scale": "크기",
+    "opacity": "불투명도",
+    "status": "상태",
+    "capturing": "캡처 중",
+    "disconnected": "연결 해제",
+    "no_device": "장치 없음",
+    "inactive": "비활성",
+    "face_camera": "카메라 향하기",
+    "fixed": "고정"
   }
 }

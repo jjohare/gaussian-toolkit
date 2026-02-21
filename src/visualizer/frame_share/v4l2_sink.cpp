@@ -55,7 +55,7 @@ namespace lfs::vis {
         }
 
         const std::string path = "/dev/video" + std::to_string(dev_idx);
-        fd_ = open(path.c_str(), O_WRONLY | O_NONBLOCK);
+        fd_ = open(path.c_str(), O_WRONLY);
         if (fd_ < 0) {
             LOG_ERROR("Frame share: failed to open {}: {}", path, strerror(errno));
             return false;
@@ -127,7 +127,7 @@ namespace lfs::vis {
                 glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
 
                 ssize_t written = write(fd_, flip_buffer_.data(), rgb_size);
-                if (written < 0 && errno != EAGAIN) {
+                if (written < 0) {
                     LOG_ERROR("Frame share: v4l2 write failed: {}", strerror(errno));
                 }
             }

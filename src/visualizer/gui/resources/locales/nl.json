@@ -861,5 +861,23 @@
     "error": "Fout",
     "fps_limit": "FPS-limiet",
     "output_resolution": "Uitvoerresolutie"
+  },
+  "webcam": {
+    "title": "Webcam",
+    "enable": "Inschakelen",
+    "device": "Apparaat",
+    "resolution": "Resolutie",
+    "mode": "Modus",
+    "position": "Positie",
+    "rotation": "Rotatie",
+    "scale": "Schaal",
+    "opacity": "Dekking",
+    "status": "Status",
+    "capturing": "Opname",
+    "disconnected": "Niet verbonden",
+    "no_device": "Geen apparaat",
+    "inactive": "Inactief",
+    "face_camera": "Richting camera",
+    "fixed": "Vast"
   }
 }

@@ -25,6 +25,7 @@ set(RENDERING_SOURCES
         mesh_renderer.cpp
         mesh2splat.cpp
         depth_compositor.cpp
+        billboard_renderer.cpp
 )
 
 # Conditionally add CUDA GL interop

@@ -59,9 +59,13 @@ namespace lfs::vis {
         // Create frame share manager before rendering (destroyed after due to declaration order)
         frame_share_manager_ = std::make_unique<FrameShareManager>();
 
+        // Create webcam manager
+        webcam_manager_ = std::make_unique<WebcamManager>();
+
         // Create rendering manager with initial antialiasing setting
         rendering_manager_ = std::make_unique<RenderingManager>();
         rendering_manager_->setFrameShareManager(frame_share_manager_.get());
+        rendering_manager_->setWebcamManager(webcam_manager_.get());
 
         // Set initial antialiasing
         RenderSettings initial_settings;
@@ -655,6 +659,11 @@ namespace lfs::vis {
             rendering_manager_->initialize();
         }
 
+        // Initialize webcam manager (needs GL context)
+        if (webcam_manager_ && !webcam_manager_->isInitialized()) {
+            webcam_manager_->initialize();
+        }
+
         // Initialize tools AFTER rendering is initialized (only once!)
         if (!tools_initialized_) {
             initializeTools();
@@ -1005,7 +1014,9 @@ namespace lfs::vis {
         const bool has_python_overlay = python::has_viewport_draw_handlers();
         const bool needs_gui_animation = gui_manager_ && gui_manager_->needsAnimationFrame();
 
-        if (needs_render || continuous_input || has_python_animation || has_python_overlay || needs_gui_animation) {
+        const bool webcam_active = webcam_manager_ && webcam_manager_->isCapturing();
+
+        if (needs_render || continuous_input || has_python_animation || has_python_overlay || needs_gui_animation || webcam_active) {
             window_manager_->pollEvents();
         } else if (is_training) {
             // Training: longer wait to reduce GPU load and memory fragmentation

@@ -861,5 +861,23 @@
     "error": "Errore",
     "fps_limit": "Limite FPS",
     "output_resolution": "Risoluzione di uscita"
+  },
+  "webcam": {
+    "title": "Webcam",
+    "enable": "Attiva",
+    "device": "Dispositivo",
+    "resolution": "Risoluzione",
+    "mode": "Modalità",
+    "position": "Posizione",
+    "rotation": "Rotazione",
+    "scale": "Scala",
+    "opacity": "Opacità",
+    "status": "Stato",
+    "capturing": "In cattura",
+    "disconnected": "Disconnesso",
+    "no_device": "Nessun dispositivo",
+    "inactive": "Inattivo",
+    "face_camera": "Fronte camera",
+    "fixed": "Fisso"
   }
 }

@@ -21,6 +21,7 @@
 namespace lfs::vis {
     class SceneManager;
     class FrameShareManager;
+    class WebcamManager;
 } // namespace lfs::vis
 
 namespace lfs::vis {
@@ -343,6 +344,9 @@ namespace lfs::vis {
         // Frame sharing
         void setFrameShareManager(FrameShareManager* mgr) { frame_share_manager_ = mgr; }
 
+        // Webcam billboard
+        void setWebcamManager(WebcamManager* mgr) { webcam_manager_ = mgr; }
+
         // Camera frustum picking
         int pickCameraFrustum(const glm::vec2& mouse_pos);
         void setHoveredCameraId(int cam_id) { hovered_camera_id_ = cam_id; }
@@ -564,6 +568,7 @@ namespace lfs::vis {
         bool ellipsoid_gizmo_active_ = false;
 
         FrameShareManager* frame_share_manager_ = nullptr;
+        WebcamManager* webcam_manager_ = nullptr;
         glm::vec3 pending_cropbox_min_{0.0f};
         glm::vec3 pending_cropbox_max_{0.0f};
         glm::mat4 pending_cropbox_transform_{1.0f};

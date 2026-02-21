@@ -22,6 +22,7 @@
 #include "training/components/ppisp_controller.hpp"
 #include "training/trainer.hpp"
 #include "training/training_manager.hpp"
+#include "webcam/webcam_manager.hpp"
 #include <algorithm>
 #include <cuda_runtime.h>
 #include <glad/glad.h>
@@ -1169,6 +1170,21 @@ namespace lfs::vis {
                 engine_->compositeMeshAndSplat(cached_result_, display_size);
             }
 
+            if (webcam_manager_ && webcam_manager_->isEnabled()) {
+                glViewport(viewport_pos.x, viewport_pos.y, display_size.x, display_size.y);
+                glEnable(GL_DEPTH_TEST);
+                glDepthFunc(GL_LESS);
+                glEnable(GL_BLEND);
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+                const auto view = context.viewport.getViewMatrix();
+                const auto proj = context.viewport.getProjectionMatrix(settings_.focal_length_mm);
+                const glm::vec3 cam_pos = -glm::transpose(context.viewport.camera.R) * context.viewport.camera.t;
+                webcam_manager_->renderBillboard(view, proj, cam_pos);
+
+                glDisable(GL_BLEND);
+            }
+
             if (frame_share_manager_ && frame_share_manager_->isEnabled()) {
                 frame_share_manager_->onFrameFromViewport(
                     viewport_pos.x, viewport_pos.y,
@@ -1525,6 +1541,22 @@ namespace lfs::vis {
                     }
                 }
             }
+        }
+
+        // Webcam billboard (after splat+mesh composite, depth buffer is populated)
+        if (webcam_manager_ && webcam_manager_->isEnabled()) {
+            glViewport(viewport_pos.x, viewport_pos.y, render_size.x, render_size.y);
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_LESS);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+            const auto view = context.viewport.getViewMatrix();
+            const auto proj = context.viewport.getProjectionMatrix(settings_.focal_length_mm);
+            const glm::vec3 cam_pos = -glm::transpose(context.viewport.camera.R) * context.viewport.camera.t;
+            webcam_manager_->renderBillboard(view, proj, cam_pos);
+
+            glDisable(GL_BLEND);
         }
 
         const bool frame_presented = splats_presented || (engine_ && engine_->hasMeshRender());

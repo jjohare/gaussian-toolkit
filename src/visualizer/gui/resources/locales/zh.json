@@ -861,5 +861,23 @@
     "error": "错误",
     "fps_limit": "FPS限制",
     "output_resolution": "输出分辨率"
+  },
+  "webcam": {
+    "title": "摄像头",
+    "enable": "启用",
+    "device": "设备",
+    "resolution": "分辨率",
+    "mode": "模式",
+    "position": "位置",
+    "rotation": "旋转",
+    "scale": "缩放",
+    "opacity": "不透明度",
+    "status": "状态",
+    "capturing": "捕获中",
+    "disconnected": "已断开",
+    "no_device": "无设备",
+    "inactive": "未激活",
+    "face_camera": "面向摄像头",
+    "fixed": "固定"
   }
 }
