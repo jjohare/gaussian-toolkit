@@ -278,6 +278,8 @@ namespace lfs::vis::gui {
         const int ctx_h = static_cast<int>(viewport.size.y);
 
         rml_context_->SetDimensions(Rml::Vector2i(ctx_w, ctx_h));
+        document_->SetProperty("width", std::format("{}px", ctx_w));
+        document_->SetProperty("height", std::format("{}px", ctx_h));
         rml_context_->Update();
 
         ImVec2 overlay_box_pos = {};
