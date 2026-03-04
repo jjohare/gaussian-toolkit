@@ -230,11 +230,13 @@ namespace lfs::training {
         lfs::core::NodeId point_cloud_node_id = lfs::core::NULL_NODE;
         lfs::core::NodeId parent_id = lfs::core::NULL_NODE;
         const lfs::core::PointCloud* point_cloud = nullptr;
+        glm::mat4 node_transform{1.0f};
 
         for (const auto* node : scene.getNodes()) {
             if (node->type == lfs::core::NodeType::POINTCLOUD && node->point_cloud) {
                 point_cloud_node_id = node->id;
                 parent_id = node->parent_id;
+                node_transform = node->transform();
                 point_cloud = node->point_cloud.get();
                 break;
             }
@@ -360,6 +362,9 @@ namespace lfs::training {
         auto model = std::make_unique<lfs::core::SplatData>(std::move(*splat_result));
         LOG_INFO("Created training model with {} gaussians", model->size());
         scene.addSplat("Model", std::move(model), parent_id);
+        if (node_transform != glm::mat4{1.0f}) {
+            scene.setNodeTransform("Model", node_transform);
+        }
         scene.setTrainingModelNode("Model");
 
         return {};
