@@ -4,6 +4,7 @@
 #pragma once
 
 #include "gui/rmlui/rml_fbo.hpp"
+#include "gui/sequencer_ui_state.hpp"
 #include "sequencer_controller.hpp"
 #include <RmlUi/Core/EventListener.h>
 #include <optional>
@@ -39,8 +40,8 @@ namespace lfs::vis {
     };
 
     namespace panel_config {
-        inline constexpr float TRANSPORT_ROW_HEIGHT = 32.0f;
-        inline constexpr float HEIGHT = 104.0f;
+        inline constexpr float TRANSPORT_ROW_HEIGHT = 36.0f;
+        inline constexpr float HEIGHT = 108.0f;
         inline constexpr float PADDING_H = 16.0f;
         inline constexpr float PADDING_BOTTOM = 18.0f;
         inline constexpr float INNER_PADDING = 8.0f;
@@ -79,7 +80,8 @@ namespace lfs::vis {
 
     class RmlSequencerPanel {
     public:
-        RmlSequencerPanel(SequencerController& controller, gui::RmlUIManager* rml_manager);
+        RmlSequencerPanel(SequencerController& controller, gui::panels::SequencerUIState& ui_state,
+                          gui::RmlUIManager* rml_manager);
         ~RmlSequencerPanel();
 
         RmlSequencerPanel(const RmlSequencerPanel&) = delete;
@@ -88,9 +90,12 @@ namespace lfs::vis {
         void render(float viewport_x, float viewport_width, float viewport_y_bottom,
                     const PanelInputState& input);
 
-        void setSnapEnabled(bool enabled) { snap_enabled_ = enabled; }
-        void setSnapInterval(float interval) { snap_interval_ = interval; }
         void setFilmStripAttached(bool attached) { film_strip_attached_ = attached; }
+
+        [[nodiscard]] bool consumeSavePathRequest();
+        [[nodiscard]] bool consumeLoadPathRequest();
+        [[nodiscard]] bool consumeExportRequest();
+        [[nodiscard]] bool consumeClearRequest();
 
         void openFocalLengthEdit(size_t index, float current_focal_mm);
 
@@ -124,6 +129,7 @@ namespace lfs::vis {
         void updateButtonStates();
         void updatePlayhead();
         void updateTimeDisplay();
+        void updateTransportSettings();
         void rebuildKeyframes();
         void rebuildRuler();
         void forwardInput(const PanelInputState& input);
@@ -145,6 +151,7 @@ namespace lfs::vis {
         };
 
         SequencerController& controller_;
+        gui::panels::SequencerUIState& ui_state_;
         gui::RmlUIManager* rml_manager_;
         TransportClickListener transport_listener_;
 
@@ -165,6 +172,22 @@ namespace lfs::vis {
         Rml::Element* el_play_icon_ = nullptr;
         Rml::Element* el_btn_loop_ = nullptr;
         Rml::Element* el_timeline_ = nullptr;
+
+        // Transport settings elements
+        Rml::Element* el_btn_camera_path_ = nullptr;
+        Rml::Element* el_btn_snap_ = nullptr;
+        Rml::Element* el_btn_follow_ = nullptr;
+        Rml::Element* el_btn_film_strip_ = nullptr;
+        Rml::Element* el_btn_preview_ = nullptr;
+        Rml::Element* el_speed_label_ = nullptr;
+        Rml::Element* el_format_label_ = nullptr;
+        Rml::Element* el_resolution_info_ = nullptr;
+        Rml::Element* el_quality_slider_ = nullptr;
+        Rml::Element* el_quality_value_ = nullptr;
+        Rml::Element* el_btn_save_ = nullptr;
+        Rml::Element* el_btn_load_ = nullptr;
+        Rml::Element* el_btn_export_ = nullptr;
+        Rml::Element* el_btn_clear_ = nullptr;
 
         // Keyframe element pool
         std::vector<Rml::Element*> keyframe_elements_;
@@ -203,10 +226,14 @@ namespace lfs::vis {
         float zoom_level_ = 1.0f;
         float pan_offset_ = 0.0f;
 
-        bool snap_enabled_ = false;
-        float snap_interval_ = 0.5f;
         bool film_strip_attached_ = false;
         bool last_film_strip_attached_ = false;
+
+        // Request flags consumed by SequencerUIManager
+        bool save_path_requested_ = false;
+        bool load_path_requested_ = false;
+        bool export_requested_ = false;
+        bool clear_requested_ = false;
 
         // Time editing
         bool editing_keyframe_time_ = false;

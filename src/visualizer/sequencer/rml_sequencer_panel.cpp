@@ -14,11 +14,13 @@
 #include "gui/rmlui/rmlui_render_interface.hpp"
 #include "gui/string_keys.hpp"
 #include "internal/resource_paths.hpp"
+#include "io/video/video_export_options.hpp"
 #include "rendering/render_constants.hpp"
 #include "theme/theme.hpp"
 
 #include <RmlUi/Core.h>
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -34,6 +36,31 @@ namespace lfs::vis {
         constexpr float DOUBLE_CLICK_TIME = 0.3f;
         constexpr float DRAG_THRESHOLD_PX = 3.0f;
         constexpr float PLAYHEAD_HIT_RADIUS = 6.0f;
+
+        constexpr std::array<float, 5> SPEED_PRESETS = {0.25f, 0.5f, 1.0f, 2.0f, 4.0f};
+
+        [[nodiscard]] size_t findSpeedIndex(const float speed) {
+            size_t best = 2;
+            float best_diff = 100.0f;
+            for (size_t i = 0; i < SPEED_PRESETS.size(); ++i) {
+                const float diff = std::abs(SPEED_PRESETS[i] - speed);
+                if (diff < best_diff) {
+                    best_diff = diff;
+                    best = i;
+                }
+            }
+            return best;
+        }
+
+        [[nodiscard]] std::string formatSpeed(const float speed) {
+            if (speed >= 1.0f)
+                return std::format("{}x", static_cast<int>(speed));
+            return std::format("{:.2g}x", speed);
+        }
+
+        [[nodiscard]] std::string formatPresetShort(const lfs::io::video::VideoPreset preset) {
+            return lfs::io::video::getPresetInfo(preset).name;
+        }
 
         [[nodiscard]] std::string formatTime(const float seconds) {
             const int mins = static_cast<int>(seconds) / 60;
@@ -56,8 +83,10 @@ namespace lfs::vis {
     using gui::rml_theme::colorToRmlAlpha;
     using namespace panel_config;
 
-    RmlSequencerPanel::RmlSequencerPanel(SequencerController& controller, gui::RmlUIManager* rml_manager)
+    RmlSequencerPanel::RmlSequencerPanel(SequencerController& controller, gui::panels::SequencerUIState& ui_state,
+                                         gui::RmlUIManager* rml_manager)
         : controller_(controller),
+          ui_state_(ui_state),
           rml_manager_(rml_manager) {
         assert(rml_manager_);
         transport_listener_.panel = this;
@@ -73,6 +102,7 @@ namespace lfs::vis {
 
         const auto& id = el->GetId();
         auto& ctrl = panel->controller_;
+        auto& ui = panel->ui_state_;
 
         if (id == "btn-skip-back")
             ctrl.seekToFirstKeyframe();
@@ -86,6 +116,42 @@ namespace lfs::vis {
             ctrl.toggleLoop();
         else if (id == "btn-add")
             lfs::core::events::cmd::SequencerAddKeyframe{}.emit();
+        else if (id == "btn-camera-path")
+            ui.show_camera_path = !ui.show_camera_path;
+        else if (id == "btn-snap")
+            ui.snap_to_grid = !ui.snap_to_grid;
+        else if (id == "btn-follow")
+            ui.follow_playback = !ui.follow_playback;
+        else if (id == "btn-film-strip")
+            ui.show_film_strip = !ui.show_film_strip;
+        else if (id == "btn-preview")
+            ui.show_pip_preview = !ui.show_pip_preview;
+        else if (id == "btn-speed") {
+            const size_t idx = findSpeedIndex(ui.playback_speed);
+            const size_t next = (idx + 1) % SPEED_PRESETS.size();
+            ui.playback_speed = SPEED_PRESETS[next];
+            ctrl.setPlaybackSpeed(ui.playback_speed);
+        } else if (id == "btn-format") {
+            using lfs::io::video::VideoPreset;
+            auto p = static_cast<int>(ui.preset);
+            p = (p + 1) % static_cast<int>(VideoPreset::CUSTOM);
+            ui.preset = static_cast<VideoPreset>(p);
+            const auto info = lfs::io::video::getPresetInfo(ui.preset);
+            ui.custom_width = info.width;
+            ui.custom_height = info.height;
+            ui.framerate = info.framerate;
+        } else if (id == "btn-save-path")
+            panel->save_path_requested_ = true;
+        else if (id == "btn-load-path")
+            panel->load_path_requested_ = true;
+        else if (id == "btn-export")
+            panel->export_requested_ = true;
+        else if (id == "btn-clear")
+            panel->clear_requested_ = true;
+        else if (id == "quality-slider") {
+            auto val_str = el->GetAttribute<Rml::String>("value", "18");
+            ui.quality = std::clamp(std::stoi(val_str), 15, 28);
+        }
     }
 
     TimelineContextMenuState RmlSequencerPanel::consumeContextMenu() {
@@ -163,6 +229,22 @@ namespace lfs::vis {
         el_play_icon_ = document_->GetElementById("play-icon");
         el_btn_loop_ = document_->GetElementById("btn-loop");
         el_timeline_ = document_->GetElementById("timeline");
+
+        el_btn_camera_path_ = document_->GetElementById("btn-camera-path");
+        el_btn_snap_ = document_->GetElementById("btn-snap");
+        el_btn_follow_ = document_->GetElementById("btn-follow");
+        el_btn_film_strip_ = document_->GetElementById("btn-film-strip");
+        el_btn_preview_ = document_->GetElementById("btn-preview");
+        el_speed_label_ = document_->GetElementById("speed-label");
+        el_format_label_ = document_->GetElementById("format-label");
+        el_resolution_info_ = document_->GetElementById("resolution-info");
+        el_quality_slider_ = document_->GetElementById("quality-slider");
+        el_quality_value_ = document_->GetElementById("quality-value");
+        el_btn_save_ = document_->GetElementById("btn-save-path");
+        el_btn_load_ = document_->GetElementById("btn-load-path");
+        el_btn_export_ = document_->GetElementById("btn-export");
+        el_btn_clear_ = document_->GetElementById("btn-clear");
+
         elements_cached_ = el_ruler_ && el_keyframes_ && el_playhead_ &&
                            el_current_time_ && el_duration_ && el_play_icon_ &&
                            el_btn_loop_ && el_timeline_;
@@ -172,11 +254,18 @@ namespace lfs::vis {
         }
 
         for (const char* btn_id : {"btn-skip-back", "btn-stop", "btn-play",
-                                   "btn-skip-forward", "btn-loop", "btn-add"}) {
+                                   "btn-skip-forward", "btn-loop", "btn-add",
+                                   "btn-camera-path", "btn-snap", "btn-follow",
+                                   "btn-film-strip", "btn-preview", "btn-speed",
+                                   "btn-format", "btn-save-path", "btn-load-path",
+                                   "btn-export", "btn-clear"}) {
             auto* el = document_->GetElementById(btn_id);
             if (el)
                 el->AddEventListener(Rml::EventId::Click, &transport_listener_);
         }
+
+        if (el_quality_slider_)
+            el_quality_slider_->AddEventListener(Rml::EventId::Change, &transport_listener_);
     }
 
     std::string RmlSequencerPanel::generateThemeRCSS() const {
@@ -191,6 +280,16 @@ namespace lfs::vis {
         const auto bg_alpha = colorToRmlAlpha(p.background, 0.8f);
         const auto border_dim = colorToRmlAlpha(p.border, 0.3f);
         const auto error = colorToRml(p.error);
+        const auto primary_active = colorToRmlAlpha(p.primary, 0.20f);
+        const auto primary_btn = colorToRmlAlpha(p.primary, 0.15f);
+        const auto primary_btn_hover = colorToRmlAlpha(p.primary, 0.25f);
+        const auto error_btn = colorToRmlAlpha(p.error, 0.15f);
+        const auto error_btn_hover = colorToRmlAlpha(p.error, 0.30f);
+        const auto primary_cam_bg = colorToRmlAlpha(p.primary, 0.30f);
+        const auto primary_cam_border = colorToRmlAlpha(p.primary, 0.50f);
+        const auto primary_export_border = colorToRmlAlpha(p.primary, 0.40f);
+        const auto surface_bright_alpha = colorToRmlAlpha(p.surface_bright, 0.30f);
+        const auto primary_color = colorToRml(p.primary);
         const int rounding = static_cast<int>(t.sizes.window_rounding);
 
         const std::string radius_str = film_strip_attached_
@@ -211,7 +310,24 @@ namespace lfs::vis {
             "#duration {{ color: {}; }}\n"
             "#easing-stripe {{ border-top: 1dp {}; }}\n"
             "#transport-row {{ border-bottom: 1dp {}; }}\n"
-            "#time-display {{ border-left: 1dp {}; }}\n",
+            ".transport-sep {{ background-color: {}; }}\n"
+            ".transport-label {{ color: {}; }}\n"
+            ".transport-info {{ color: {}; }}\n"
+            ".transport-btn.toggle.active {{ background-color: {}; }}\n"
+            ".transport-btn.primary {{ background-color: {}; }}\n"
+            ".transport-btn.primary:hover {{ background-color: {}; }}\n"
+            ".transport-btn.error:hover {{ background-color: {}; }}\n"
+            "#btn-camera-path.active {{ background-color: {}; border-width: 1dp; border-color: {}; }}\n"
+            "#btn-add .transport-icon {{ image-color: {}; }}\n"
+            ".speed-val {{ color: {}; }}\n"
+            ".speed-text {{ color: {}; }}\n"
+            ".dropdown-arrow {{ color: {}; }}\n"
+            ".snap-check {{ border-color: {}; }}\n"
+            "#btn-snap.active .snap-check {{ background-color: {}; border-color: {}; }}\n"
+            ".format-badge {{ background-color: {}; }}\n"
+            "#btn-export {{ border-width: 1dp; border-color: {}; }}\n"
+            "#btn-clear {{ background-color: {}; border-width: 1dp; border-color: {}; }}\n"
+            "#btn-clear .transport-icon {{ image-color: {}; }}\n",
             surface_alpha, border, radius_str,
             text,
             bg_alpha, border_dim,
@@ -224,7 +340,24 @@ namespace lfs::vis {
             text_dim,
             border_dim,
             border_dim,
-            border_dim);
+            border_dim,
+            text,
+            text_dim,
+            primary_active,
+            primary_btn,
+            primary_btn_hover,
+            error_btn_hover,
+            primary_cam_bg, primary_cam_border,
+            error,
+            text,
+            text_dim,
+            text_dim,
+            text_dim,
+            primary_color, primary_color,
+            surface_bright_alpha,
+            primary_export_border,
+            error_btn, error_btn,
+            error);
     }
 
     void RmlSequencerPanel::syncTheme() {
@@ -463,6 +596,69 @@ namespace lfs::vis {
         return result;
     }
 
+    bool RmlSequencerPanel::consumeSavePathRequest() {
+        const bool r = save_path_requested_;
+        save_path_requested_ = false;
+        return r;
+    }
+
+    bool RmlSequencerPanel::consumeLoadPathRequest() {
+        const bool r = load_path_requested_;
+        load_path_requested_ = false;
+        return r;
+    }
+
+    bool RmlSequencerPanel::consumeExportRequest() {
+        const bool r = export_requested_;
+        export_requested_ = false;
+        return r;
+    }
+
+    bool RmlSequencerPanel::consumeClearRequest() {
+        const bool r = clear_requested_;
+        clear_requested_ = false;
+        return r;
+    }
+
+    void RmlSequencerPanel::updateTransportSettings() {
+        if (!elements_cached_)
+            return;
+
+        const bool has_keyframes = !controller_.timeline().empty();
+
+        if (el_btn_camera_path_)
+            el_btn_camera_path_->SetClass("active", ui_state_.show_camera_path);
+        if (el_btn_snap_)
+            el_btn_snap_->SetClass("active", ui_state_.snap_to_grid);
+        if (el_btn_follow_)
+            el_btn_follow_->SetClass("active", ui_state_.follow_playback);
+        if (el_btn_film_strip_)
+            el_btn_film_strip_->SetClass("active", ui_state_.show_film_strip);
+        if (el_btn_preview_)
+            el_btn_preview_->SetClass("active", ui_state_.show_pip_preview);
+        if (el_speed_label_)
+            el_speed_label_->SetInnerRML(formatSpeed(ui_state_.playback_speed));
+        if (el_format_label_)
+            el_format_label_->SetInnerRML(formatPresetShort(ui_state_.preset));
+        if (el_resolution_info_) {
+            const auto info = lfs::io::video::getPresetInfo(ui_state_.preset);
+            const bool custom = ui_state_.preset == lfs::io::video::VideoPreset::CUSTOM;
+            const int w = custom ? ui_state_.custom_width : info.width;
+            const int h = custom ? ui_state_.custom_height : info.height;
+            const int fps = custom ? ui_state_.framerate : info.framerate;
+            el_resolution_info_->SetInnerRML(std::format("{}x{} @ {}fps", w, h, fps));
+        }
+        if (el_quality_value_)
+            el_quality_value_->SetInnerRML(std::to_string(ui_state_.quality));
+
+        if (el_btn_save_)
+            el_btn_save_->SetClass("disabled", !has_keyframes);
+        if (el_btn_export_)
+            el_btn_export_->SetClass("disabled", !has_keyframes);
+        if (el_btn_clear_)
+            el_btn_clear_->SetClass("disabled", !has_keyframes);
+    }
+
     float RmlSequencerPanel::timelineWidth() const {
         const float s = cached_dp_ratio_;
         return cached_panel_width_ - 2.0f * INNER_PADDING_H * s;
@@ -510,6 +706,7 @@ namespace lfs::vis {
             el_timeline_->SetProperty("width", std::format("{:.1f}px", timelineWidth()));
 
             updateButtonStates();
+            updateTransportSettings();
             updatePlayhead();
             updateTimeDisplay();
             rebuildKeyframes();
@@ -666,7 +863,7 @@ namespace lfs::vis {
             if (input.mouse_down[0]) {
                 float time = xToTime(mx, pos.x, width);
                 time = std::clamp(time, 0.0f, timeline.endTime());
-                if (snap_enabled_)
+                if (ui_state_.snap_to_grid)
                     time = snapTime(time);
                 controller_.scrub(time);
             } else {
@@ -679,7 +876,7 @@ namespace lfs::vis {
             if (input.mouse_down[0]) {
                 float new_time = xToTime(mx, pos.x, width);
                 new_time = std::max(new_time, MIN_KEYFRAME_SPACING);
-                if (snap_enabled_)
+                if (ui_state_.snap_to_grid)
                     new_time = snapTime(new_time);
                 controller_.timeline().setKeyframeTime(dragged_keyframe_index_, new_time, false);
             } else {
@@ -748,9 +945,9 @@ namespace lfs::vis {
     }
 
     float RmlSequencerPanel::snapTime(const float time) const {
-        if (!snap_enabled_ || snap_interval_ <= 0.0f)
+        if (!ui_state_.snap_to_grid || ui_state_.snap_interval <= 0.0f)
             return time;
-        return std::round(time / snap_interval_) * snap_interval_;
+        return std::round(time / ui_state_.snap_interval) * ui_state_.snap_interval;
     }
 
 } // namespace lfs::vis

@@ -13,6 +13,8 @@
 #include "core/logger.hpp"
 #include "gui/rml_sequencer_overlay.hpp"
 #include "gui/string_keys.hpp"
+#include "gui/utils/windows_utils.hpp"
+#include "io/video/video_export_options.hpp"
 #include "rendering/rendering.hpp"
 #include "rendering/rendering_manager.hpp"
 #include "scene/scene_manager.hpp"
@@ -34,7 +36,7 @@ namespace lfs::vis::gui {
                                            gui::RmlUIManager* rml_manager)
         : viewer_(viewer),
           ui_state_(ui_state),
-          panel_(std::make_unique<RmlSequencerPanel>(controller_, rml_manager)),
+          panel_(std::make_unique<RmlSequencerPanel>(controller_, ui_state_, rml_manager)),
           overlay_(std::make_unique<RmlSequencerOverlay>(controller_, rml_manager)),
           scene_sync_(std::make_unique<KeyframeSceneSync>(controller_, viewer)) {}
 
@@ -164,8 +166,6 @@ namespace lfs::vis::gui {
             }
         }
 
-        panel_->setSnapEnabled(ui_state_.snap_to_grid);
-        panel_->setSnapInterval(ui_state_.snap_interval);
         panel_->setFilmStripAttached(ui_state_.show_film_strip);
 
         lfs::vis::PanelInputState input;
@@ -194,8 +194,12 @@ namespace lfs::vis::gui {
         if (panel_->isHovered()) {
             ImGui::GetIO().WantCaptureMouse = true;
             auto tip = panel_->consumeTooltip();
-            if (!tip.empty())
+            if (!tip.empty()) {
+                const ImVec2 cursor_pos = ImGui::GetMousePos();
+                ImGui::SetNextWindowPos(ImVec2(cursor_pos.x, cursor_pos.y),
+                                        ImGuiCond_Always, ImVec2(0.0f, 1.0f));
                 ImGui::SetTooltip("%s", tip.c_str());
+            }
         }
 
         const auto timeline_menu = panel_->consumeContextMenu();
@@ -211,6 +215,54 @@ namespace lfs::vis::gui {
         const auto focal_req = panel_->consumeFocalEditRequest();
         if (focal_req.active)
             overlay_->showFocalEdit(focal_req.keyframe_index, focal_req.current_focal_mm);
+
+        if (panel_->consumeSavePathRequest()) {
+            const auto path = gui::SaveJsonFileDialog("camera_path.json");
+            if (!path.empty()) {
+                if (controller_.timeline().saveToJson(path.string()))
+                    LOG_INFO("Camera path saved to {}", path.string());
+                else
+                    LOG_ERROR("Failed to save camera path to {}", path.string());
+            }
+        }
+
+        if (panel_->consumeLoadPathRequest()) {
+            const auto path = gui::OpenJsonFileDialog();
+            if (!path.empty()) {
+                if (controller_.timeline().loadFromJson(path.string())) {
+                    LOG_INFO("Camera path loaded from {}", path.string());
+                    lfs::core::events::state::KeyframeListChanged{
+                        .count = controller_.timeline().size()}
+                        .emit();
+                } else {
+                    LOG_ERROR("Failed to load camera path from {}", path.string());
+                }
+            }
+        }
+
+        if (panel_->consumeExportRequest() && !controller_.timeline().empty()) {
+            const auto info = lfs::io::video::getPresetInfo(ui_state_.preset);
+            const int w = ui_state_.preset == lfs::io::video::VideoPreset::CUSTOM
+                              ? ui_state_.custom_width
+                              : info.width;
+            const int h = ui_state_.preset == lfs::io::video::VideoPreset::CUSTOM
+                              ? ui_state_.custom_height
+                              : info.height;
+            lfs::core::events::cmd::SequencerExportVideo{
+                .width = w,
+                .height = h,
+                .framerate = ui_state_.framerate,
+                .crf = ui_state_.quality}
+                .emit();
+        }
+
+        if (panel_->consumeClearRequest() && !controller_.timeline().empty()) {
+            controller_.stop();
+            controller_.deselectKeyframe();
+            controller_.timeline().clear();
+            lfs::core::events::state::KeyframeListChanged{.count = 0}.emit();
+            LOG_INFO("All keyframes cleared");
+        }
     }
 
     void SequencerUIManager::renderCameraPath(const ViewportLayout& viewport) {
