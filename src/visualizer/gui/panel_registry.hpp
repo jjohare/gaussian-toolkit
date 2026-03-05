@@ -106,6 +106,11 @@ namespace lfs::vis::gui {
         bool float_resizing = false;
         float float_resize_start_w = 0;
         float float_resize_start_mx = 0;
+        float float_resize_start_h = 0;
+        float float_resize_start_my = 0;
+        bool float_resize_x = false;
+        bool float_resize_y = false;
+        float float_user_height = 0;
         static constexpr int MAX_CONSECUTIVE_ERRORS = 3;
 
         bool has_option(PanelOption opt) const {

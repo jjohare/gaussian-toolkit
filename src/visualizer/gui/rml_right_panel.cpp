@@ -255,6 +255,7 @@ namespace lfs::vis::gui {
             if (input.mouse_down[0]) {
                 if (on_splitter_delta && delta_y != 0.0f)
                     on_splitter_delta(delta_y);
+                cursor_request_ = CursorRequest::ResizeNS;
             } else {
                 splitter_dragging_ = false;
                 if (splitter_el_)

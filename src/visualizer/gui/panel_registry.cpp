@@ -142,10 +142,24 @@ namespace lfs::vis::gui {
                         snap.panel->draw(ctx);
                     } else if (snap.panel->supportsDirectDraw()) {
                         float w = snap.initial_width > 0 ? snap.initial_width : 560.0f;
-                        const float h = snap.panel->getDirectDrawHeight() > 0
-                                            ? snap.panel->getDirectDrawHeight()
-                                            : (snap.initial_height > 0 ? snap.initial_height : 400.0f);
                         const auto* vp = ImGui::GetMainViewport();
+                        const float drawn_h = snap.panel->getDirectDrawHeight();
+                        float h;
+                        {
+                            std::lock_guard lock(mutex_);
+                            if (snap.index < panels_.size() && panels_[snap.index].idname == snap.idname &&
+                                panels_[snap.index].float_user_height > 0)
+                                h = panels_[snap.index].float_user_height;
+                            else if (drawn_h > 0)
+                                h = std::min(drawn_h, vp->WorkSize.y);
+                            else if (snap.initial_height > 0)
+                                h = snap.initial_height;
+                            else
+                                h = 400.0f;
+                        }
+
+                        if (drawn_h > 0 && h > drawn_h)
+                            h = drawn_h;
 
                         float px = snap.float_x;
                         float py = snap.float_y;
@@ -162,9 +176,13 @@ namespace lfs::vis::gui {
                                                        mouse.y >= py && mouse.y < py + 28.0f;
                         constexpr float kResizeEdge = 6.0f;
                         constexpr float kMinPanelWidth = 300.0f;
-                        const bool mouse_in_resize_grip = mouse.x >= px + w - kResizeEdge &&
-                                                          mouse.x < px + w + kResizeEdge &&
-                                                          mouse.y >= py && mouse.y < py + h;
+                        constexpr float kMinPanelHeight = 150.0f;
+                        const bool on_right = mouse.x >= px + w - kResizeEdge && mouse.x < px + w + kResizeEdge;
+                        const bool on_bottom = mouse.y >= py + h - kResizeEdge && mouse.y < py + h + kResizeEdge;
+                        const bool mouse_in_resize_right = on_right && mouse.y >= py && mouse.y < py + h && !on_bottom;
+                        const bool mouse_in_resize_bottom = on_bottom && mouse.x >= px && mouse.x < px + w && !on_right;
+                        const bool mouse_in_resize_corner = on_right && on_bottom;
+                        const bool mouse_in_resize_grip = mouse_in_resize_right || mouse_in_resize_bottom || mouse_in_resize_corner;
 
                         {
                             std::lock_guard lock(mutex_);
@@ -178,6 +196,10 @@ namespace lfs::vis::gui {
                                     pi.float_resizing = true;
                                     pi.float_resize_start_w = w;
                                     pi.float_resize_start_mx = mouse.x;
+                                    pi.float_resize_start_h = h;
+                                    pi.float_resize_start_my = mouse.y;
+                                    pi.float_resize_x = mouse_in_resize_right || mouse_in_resize_corner;
+                                    pi.float_resize_y = mouse_in_resize_bottom || mouse_in_resize_corner;
                                 } else if (mouse_in_titlebar && !mouse_in_resize_grip && !any_active &&
                                            ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                                     pi.float_dragging = true;
@@ -195,12 +217,27 @@ namespace lfs::vis::gui {
                                 }
                                 if (pi.float_resizing) {
                                     if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-                                        const float delta = mouse.x - pi.float_resize_start_mx;
-                                        w = std::max(kMinPanelWidth, pi.float_resize_start_w + delta);
-                                        pi.initial_width = w;
+                                        if (pi.float_resize_x) {
+                                            const float dx = mouse.x - pi.float_resize_start_mx;
+                                            w = std::max(kMinPanelWidth, pi.float_resize_start_w + dx);
+                                            pi.initial_width = w;
+                                        }
+                                        if (pi.float_resize_y) {
+                                            const float dy = mouse.y - pi.float_resize_start_my;
+                                            h = std::max(kMinPanelHeight, pi.float_resize_start_h + dy);
+                                            pi.float_user_height = h;
+                                        }
                                     } else {
                                         pi.float_resizing = false;
+                                        pi.float_resize_x = false;
+                                        pi.float_resize_y = false;
                                     }
+                                }
+
+                                if (!pi.float_resizing && pi.float_user_height > 0) {
+                                    const float cap_h = snap.panel->getDirectDrawHeight();
+                                    if (cap_h > 0 && pi.float_user_height > cap_h)
+                                        pi.float_user_height = cap_h;
                                 }
 
                                 pi.float_x = px;
@@ -214,8 +251,15 @@ namespace lfs::vis::gui {
                         {
                             std::lock_guard lock(mutex_);
                             if (snap.index < panels_.size() && panels_[snap.index].idname == snap.idname) {
-                                if (panels_[snap.index].float_resizing || mouse_in_resize_grip)
+                                const auto& pi = panels_[snap.index];
+                                const bool rx = pi.float_resizing ? pi.float_resize_x : (mouse_in_resize_right || mouse_in_resize_corner);
+                                const bool ry = pi.float_resizing ? pi.float_resize_y : (mouse_in_resize_bottom || mouse_in_resize_corner);
+                                if (rx && ry)
+                                    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
+                                else if (rx)
                                     ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+                                else if (ry)
+                                    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
                             }
                         }
 

@@ -115,6 +115,22 @@ namespace lfs::vis::gui {
         return ops.get_content_height ? ops.get_content_height(host_) : 0.0f;
     }
 
+    void RmlImModePanelAdapter::setInputClipY(float y_min, float y_max) {
+        if (host_) {
+            const auto& ops = lfs::python::get_rml_panel_host_ops();
+            if (ops.set_input_clip_y)
+                ops.set_input_clip_y(host_, y_min, y_max);
+        }
+    }
+
+    void RmlImModePanelAdapter::setInput(const PanelInputState* input) {
+        if (host_) {
+            const auto& ops = lfs::python::get_rml_panel_host_ops();
+            if (ops.set_input)
+                ops.set_input(host_, input);
+        }
+    }
+
     bool RmlImModePanelAdapter::poll(const PanelDrawContext& ctx) {
         (void)ctx;
         if (!has_poll_)

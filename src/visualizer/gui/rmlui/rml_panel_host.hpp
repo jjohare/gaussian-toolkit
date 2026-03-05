@@ -77,9 +77,12 @@ namespace lfs::vis::gui {
         Rml::Context* rml_context_ = nullptr;
         Rml::ElementDocument* document_ = nullptr;
         Rml::Element* content_wrap_el_ = nullptr;
+        Rml::Element* content_el_ = nullptr;
+        Rml::Element* scroll_el_ = nullptr;
 
         HeightMode height_mode_ = HeightMode::Fill;
         float last_content_height_ = 0.0f;
+        float last_content_el_height_ = 0.0f;
         int last_measure_w_ = 0;
         bool content_dirty_ = true;
 

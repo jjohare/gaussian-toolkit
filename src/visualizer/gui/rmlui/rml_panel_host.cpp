@@ -29,6 +29,8 @@
 
 namespace lfs::vis::gui {
 
+    constexpr int kMaxFboSize = 8192;
+
     static std::mutex s_text_mutex;
     static std::vector<uint32_t> s_text_queue;
 
@@ -244,6 +246,8 @@ namespace lfs::vis::gui {
         assert(document_);
         auto* frame = document_->GetElementById("window-frame");
         content_wrap_el_ = frame ? frame : document_->GetElementById("content-wrap");
+        content_el_ = document_->GetElementById("content");
+        scroll_el_ = document_->GetElementById("content-wrap");
     }
 
     void RmlPanelHost::renderIfDirty(int pw, int ph, float& display_h) {
@@ -253,7 +257,7 @@ namespace lfs::vis::gui {
         const bool theme_dirty = syncThemeProperties();
         const bool size_dirty = (pw != last_fbo_w_ || ph != last_fbo_h_);
 
-        fbo_.ensure(pw, ph);
+        fbo_.ensure(pw, std::min(ph, kMaxFboSize));
         if (!fbo_.valid())
             return;
 
@@ -265,25 +269,53 @@ namespace lfs::vis::gui {
         if (height_mode_ == HeightMode::Content &&
             (content_dirty_ || pw != last_measure_w_)) {
             last_measure_w_ = pw;
+
+            const float saved_scroll = scroll_el_ ? scroll_el_->GetScrollTop() : 0;
+
             const int layout_h = 10000;
             rml_context_->SetDimensions(Rml::Vector2i(pw, layout_h));
             rml_context_->Update();
 
-            const float content_h =
-                content_wrap_el_ ? content_wrap_el_->GetOffsetHeight() : 100.0f;
-            ph = std::max(1, static_cast<int>(std::ceil(content_h)));
-            display_h = static_cast<float>(ph);
-            last_content_height_ = display_h;
+            float content_h;
+            if (content_el_) {
+                const float chrome_above =
+                    content_el_->GetAbsoluteOffset(Rml::BoxArea::Border).y -
+                    document_->GetAbsoluteOffset(Rml::BoxArea::Border).y;
+                float chrome_below = 0;
+                if (scroll_el_)
+                    chrome_below = scroll_el_->GetBox().GetEdge(Rml::BoxArea::Padding, Rml::BoxEdge::Bottom);
+                content_h = chrome_above + content_el_->GetOffsetHeight() + chrome_below;
+            } else {
+                content_h = content_wrap_el_ ? content_wrap_el_->GetOffsetHeight() : 100.0f;
+            }
+            last_content_height_ = content_h;
+            if (content_el_)
+                last_content_el_height_ = content_el_->GetOffsetHeight();
+            const int measured = std::min(kMaxFboSize,
+                                          std::max(1, static_cast<int>(std::ceil(content_h))));
+            if (ph > 0 && ph < measured) {
+                display_h = static_cast<float>(ph);
+            } else {
+                ph = measured;
+                display_h = static_cast<float>(ph);
+            }
 
             fbo_.ensure(pw, ph);
             if (!fbo_.valid())
                 return;
+
+            rml_context_->SetDimensions(Rml::Vector2i(pw, ph));
+            rml_context_->Update();
+
+            if (scroll_el_ && saved_scroll > 0)
+                scroll_el_->SetScrollTop(saved_scroll);
+        } else {
+            rml_context_->SetDimensions(Rml::Vector2i(pw, ph));
+            rml_context_->Update();
         }
         content_dirty_ = false;
-        last_content_height_ = display_h;
-
-        rml_context_->SetDimensions(Rml::Vector2i(pw, ph));
-        rml_context_->Update();
+        if (height_mode_ != HeightMode::Content)
+            last_content_height_ = display_h;
 
         auto* render = manager_->getRenderInterface();
         assert(render);
@@ -303,10 +335,11 @@ namespace lfs::vis::gui {
         last_fbo_h_ = ph;
         render_needed_ = false;
 
-        if (height_mode_ == HeightMode::Content && content_wrap_el_) {
-            const float actual_h = content_wrap_el_->GetOffsetHeight();
-            if (std::abs(actual_h - static_cast<float>(ph)) > 2.0f)
+        if (height_mode_ == HeightMode::Content && content_el_) {
+            const float actual_h = content_el_->GetOffsetHeight();
+            if (std::abs(actual_h - last_content_el_height_) > 2.0f)
                 content_dirty_ = true;
+            last_content_el_height_ = actual_h;
         }
     }
 
@@ -353,15 +386,23 @@ namespace lfs::vis::gui {
             return;
 
         const int pw = static_cast<int>(w);
-
         int ph;
         float display_h;
         if (height_mode_ == HeightMode::Content) {
-            ph = std::max(1, static_cast<int>(std::ceil(last_content_height_)));
-            display_h = last_content_height_;
+            const float ch = last_content_height_;
+            if (ch > 0 && h < ch) {
+                ph = static_cast<int>(h);
+                display_h = h;
+            } else if (ch > 0) {
+                ph = std::max(1, static_cast<int>(std::ceil(ch)));
+                display_h = ch;
+            } else {
+                ph = std::min(kMaxFboSize, static_cast<int>(h));
+                display_h = static_cast<float>(ph);
+            }
         } else {
-            ph = static_cast<int>(h);
-            display_h = h;
+            ph = std::min(kMaxFboSize, static_cast<int>(h));
+            display_h = static_cast<float>(ph);
         }
 
         if (forwardInput(x, y))
@@ -370,7 +411,10 @@ namespace lfs::vis::gui {
         renderIfDirty(pw, ph, display_h);
 
         assert(input_ && input_->bg_draw_list);
+        auto* dl = static_cast<ImDrawList*>(input_->bg_draw_list);
+        dl->PushClipRect(ImVec2(x, y), ImVec2(x + w, y + h), true);
         fbo_.blitToDrawListOpaque(input_->bg_draw_list, x, y, w, display_h);
+        dl->PopClipRect();
     }
 
     bool RmlPanelHost::forwardInput(float panel_x, float panel_y) {

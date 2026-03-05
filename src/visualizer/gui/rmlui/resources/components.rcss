@@ -9,6 +9,9 @@ div {
 body {
     font-family: Inter;
     font-size: 10dp;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
 }
 
 body.docked-panel {
@@ -16,13 +19,15 @@ body.docked-panel {
     left: 0;
     right: 0;
     top: 0;
-    height: auto;
 }
 
 /* ── Floating Window Chrome ─────────────────────────────── */
 
 #window-frame {
     border-width: 1dp;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
 }
 
 #title-bar {
@@ -47,6 +52,8 @@ body.docked-panel {
     display: flex;
     flex-direction: column;
     padding: 8dp 12dp;
+    flex: 1;
+    overflow-y: auto;
 }
 
 /* ── Scrollbars ─────────────────────────────────────────── */
