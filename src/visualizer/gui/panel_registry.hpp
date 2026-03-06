@@ -92,6 +92,7 @@ namespace lfs::vis::gui {
             (void)y_max;
         }
         virtual void setInput(const PanelInputState* input) { (void)input; }
+        virtual void setForcedHeight(float h) { (void)h; }
         virtual bool wantsKeyboard() const { return false; }
     };
 

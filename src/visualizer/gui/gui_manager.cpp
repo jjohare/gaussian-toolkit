@@ -714,6 +714,9 @@ namespace lfs::vis::gui {
             static_cast<RmlPanelHost*>(host)->setInput(
                 static_cast<const PanelInputState*>(input));
         };
+        ops.set_forced_height = [](void* host, float h) {
+            static_cast<RmlPanelHost*>(host)->setForcedHeight(h);
+        };
         lfs::python::set_rml_panel_host_ops(ops);
 
         registerNativePanels();

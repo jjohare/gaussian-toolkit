@@ -31,6 +31,7 @@ namespace lfs::vis::gui {
         float getDirectDrawHeight() const override;
         void setInputClipY(float y_min, float y_max) override;
         void setInput(const PanelInputState* input) override;
+        void setForcedHeight(float h) override;
 
     private:
         void ensureHost();

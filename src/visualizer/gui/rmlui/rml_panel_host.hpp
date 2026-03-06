@@ -52,6 +52,7 @@ namespace lfs::vis::gui {
         void setHeightMode(HeightMode mode) { height_mode_ = mode; }
         HeightMode getHeightMode() const { return height_mode_; }
         float getContentHeight() const { return last_content_height_; }
+        void setForcedHeight(float h) { forced_height_ = h; }
         void markContentDirty() { content_dirty_ = true; }
         void setForeground(bool fg) { foreground_ = fg; }
         void setInputClipY(float y_min, float y_max) {
@@ -85,6 +86,7 @@ namespace lfs::vis::gui {
         Rml::Element* scroll_el_ = nullptr;
 
         HeightMode height_mode_ = HeightMode::Fill;
+        float forced_height_ = 0.0f;
         float last_content_height_ = 0.0f;
         float last_content_el_height_ = 0.0f;
         int last_measure_w_ = 0;

@@ -146,12 +146,14 @@ namespace lfs::vis::gui {
                         const auto* vp = ImGui::GetMainViewport();
                         const float drawn_h = snap.panel->getDirectDrawHeight();
                         float h;
+                        bool has_user_height = false;
                         {
                             std::lock_guard lock(mutex_);
                             if (snap.index < panels_.size() && panels_[snap.index].idname == snap.idname &&
-                                panels_[snap.index].float_user_height > 0)
+                                panels_[snap.index].float_user_height > 0) {
                                 h = panels_[snap.index].float_user_height;
-                            else if (drawn_h > 0)
+                                has_user_height = true;
+                            } else if (drawn_h > 0)
                                 h = std::min(drawn_h, vp->WorkSize.y);
                             else if (snap.initial_height > 0)
                                 h = snap.initial_height;
@@ -159,7 +161,7 @@ namespace lfs::vis::gui {
                                 h = 400.0f;
                         }
 
-                        if (drawn_h > 0 && h > drawn_h)
+                        if (!has_user_height && drawn_h > 0 && h > drawn_h)
                             h = drawn_h;
 
                         float px = snap.float_x;
@@ -253,11 +255,11 @@ namespace lfs::vis::gui {
                                     }
                                 }
 
-                                if (!pi.float_resizing && pi.float_user_height > 0) {
-                                    const float cap_h = snap.panel->getDirectDrawHeight();
-                                    if (cap_h > 0 && pi.float_user_height > cap_h)
-                                        pi.float_user_height = cap_h;
+                                if (!pi.float_resizing && pi.float_user_height > 0 &&
+                                    snap.panel->getDirectDrawHeight() <= 0) {
+                                    pi.float_user_height = 0;
                                 }
+                                has_user_height = pi.float_user_height > 0.0f;
 
                                 constexpr float kTitleH = 28.0f;
                                 constexpr float kVisibleFrac = 0.1f;
@@ -294,8 +296,16 @@ namespace lfs::vis::gui {
                             }
                         }
 
-                        snap.panel->setInput(input);
-                        snap.panel->drawDirect(px, py, w, h, ctx);
+                        const float forced = (has_user_height && drawn_h > 0 && h > drawn_h) ? h : 0.0f;
+                        snap.panel->setForcedHeight(forced);
+                        try {
+                            snap.panel->setInput(input);
+                            snap.panel->drawDirect(px, py, w, h, ctx);
+                        } catch (...) {
+                            snap.panel->setForcedHeight(0.0f);
+                            throw;
+                        }
+                        snap.panel->setForcedHeight(0.0f);
                     } else {
                         if (snap.initial_width > 0 || snap.initial_height > 0)
                             ImGui::SetNextWindowSize(ImVec2(snap.initial_width, snap.initial_height), ImGuiCond_Appearing);

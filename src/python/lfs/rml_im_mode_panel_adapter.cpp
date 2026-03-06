@@ -160,6 +160,14 @@ namespace lfs::vis::gui {
         }
     }
 
+    void RmlImModePanelAdapter::setForcedHeight(float h) {
+        if (host_) {
+            const auto& ops = lfs::python::get_rml_panel_host_ops();
+            if (ops.set_forced_height)
+                ops.set_forced_height(host_, h);
+        }
+    }
+
     bool RmlImModePanelAdapter::poll(const PanelDrawContext& ctx) {
         (void)ctx;
         if (!has_poll_)

@@ -376,6 +376,8 @@ namespace lfs::vis::gui {
                 static_cast<int>(std::ceil(content_h)), 1, kMaxFboSize);
             if (ph > 0 && ph < measured) {
                 display_h = static_cast<float>(ph);
+            } else if (forced_height_ > 0 && ph > 0) {
+                display_h = static_cast<float>(ph);
             } else {
                 ph = measured;
                 display_h = static_cast<float>(ph);
@@ -473,8 +475,9 @@ namespace lfs::vis::gui {
                 ph = static_cast<int>(requested_h);
                 display_h = requested_h;
             } else if (ch > 0) {
-                ph = std::max(1, static_cast<int>(std::ceil(ch)));
-                display_h = ch;
+                const float eff = (forced_height_ > 0) ? std::max(forced_height_, ch) : ch;
+                ph = std::max(1, static_cast<int>(std::ceil(eff)));
+                display_h = eff;
             } else {
                 float initial_h = requested_h;
                 if (clip_y_min_ >= 0.0f && clip_y_max_ > clip_y_min_)

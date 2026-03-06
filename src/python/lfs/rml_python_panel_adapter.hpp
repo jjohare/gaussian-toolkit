@@ -37,6 +37,7 @@ namespace lfs::vis::gui {
         void drawImguiOverlay(const PanelDrawContext& ctx) override;
         void setInputClipY(float y_min, float y_max) override;
         void setInput(const PanelInputState* input) override;
+        void setForcedHeight(float h) override;
         bool wantsKeyboard() const override;
         void setForeground(bool fg);
 
