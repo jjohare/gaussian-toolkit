@@ -12,8 +12,8 @@
 #include <RmlUi/Core/DataVariable.h>
 #include <cassert>
 #include <cmath>
-#include <nanobind/stl/optional.h>
 #include <nanobind/stl/map.h>
+#include <nanobind/stl/optional.h>
 #include <unordered_set>
 
 namespace lfs::python {
