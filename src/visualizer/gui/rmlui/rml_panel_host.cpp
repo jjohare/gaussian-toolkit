@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cfloat>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <filesystem>
@@ -39,17 +40,50 @@ namespace lfs::vis::gui {
     constexpr int kMaxFboSize = 8192;
 
     static std::string s_frame_tooltip;
+    static const void* s_frame_tooltip_target = nullptr;
+    static std::chrono::steady_clock::time_point s_frame_tooltip_hover_started_at{};
+    static bool s_frame_tooltip_updated_this_frame = false;
     static bool s_frame_wants_keyboard = false;
     static bool s_frame_wants_text_input = false;
     std::vector<RmlPanelHost::CompositeCommand> RmlPanelHost::queued_foreground_composites_;
 
     std::string RmlPanelHost::consumeFrameTooltip() {
-        std::string result;
-        result.swap(s_frame_tooltip);
-        return result;
+        const bool updated = s_frame_tooltip_updated_this_frame;
+        s_frame_tooltip_updated_this_frame = false;
+        if (!updated) {
+            s_frame_tooltip.clear();
+            s_frame_tooltip_target = nullptr;
+            s_frame_tooltip_hover_started_at = {};
+            return {};
+        }
+
+        if (s_frame_tooltip.empty() || !s_frame_tooltip_target)
+            return {};
+
+        const auto now = std::chrono::steady_clock::now();
+        if (s_frame_tooltip_hover_started_at == std::chrono::steady_clock::time_point{} ||
+            now - s_frame_tooltip_hover_started_at < kRmlTooltipShowDelay)
+            return {};
+
+        return s_frame_tooltip;
     }
 
-    void RmlPanelHost::setFrameTooltip(const std::string& tip) {
+    void RmlPanelHost::setFrameTooltip(const std::string& tip, const void* hover_target) {
+        s_frame_tooltip_updated_this_frame = true;
+        if (tip.empty() || !hover_target) {
+            s_frame_tooltip.clear();
+            s_frame_tooltip_target = nullptr;
+            s_frame_tooltip_hover_started_at = {};
+            return;
+        }
+
+        if (s_frame_tooltip_target != hover_target || s_frame_tooltip != tip) {
+            s_frame_tooltip = tip;
+            s_frame_tooltip_target = hover_target;
+            s_frame_tooltip_hover_started_at = std::chrono::steady_clock::now();
+            return;
+        }
+
         s_frame_tooltip = tip;
     }
 
@@ -969,9 +1003,8 @@ namespace lfs::vis::gui {
 
         if (hovered) {
             auto* hover = rml_context_->GetHoverElement();
-            if (hover) {
-                s_frame_tooltip = resolveRmlTooltip(hover);
-            }
+            if (hover)
+                setFrameTooltip(resolveRmlTooltip(hover), hover);
         }
 
         bool forward_keys = hasFocusedKeyboardTarget(rml_context_->GetFocusElement());

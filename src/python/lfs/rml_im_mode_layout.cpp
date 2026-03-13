@@ -7,6 +7,7 @@
 #include "core/logger.hpp"
 #include "py_ui.hpp"
 #include "python/python_runtime.hpp"
+#include "visualizer/gui/rmlui/rml_tooltip.hpp"
 #include "visualizer/operator/operator_registry.hpp"
 
 #include <RmlUi/Core/Element.h>
@@ -138,6 +139,7 @@ namespace lfs::python {
         last_clicked_ = false;
         tooltip_el_ = doc->GetElementById("im-tooltip");
         tooltip_shown_ = false;
+        tooltip_candidate_seen_ = false;
         popup_backdrop_ = doc->GetElementById("im-popup-backdrop");
         popup_dialog_ = doc->GetElementById("im-popup-dialog");
         active_popup_id_.clear();
@@ -148,6 +150,11 @@ namespace lfs::python {
 
         if (!tooltip_shown_ && tooltip_el_)
             tooltip_el_->SetClass("visible", false);
+        if (!tooltip_candidate_seen_) {
+            tooltip_hover_el_ = nullptr;
+            tooltip_text_.clear();
+            tooltip_hover_started_at_ = {};
+        }
 
         for (auto& level : containers_)
             prune_excess_slots(level);
@@ -1672,6 +1679,18 @@ namespace lfs::python {
 
     void RmlImModeLayout::set_tooltip(const std::string& text) {
         if (!tooltip_el_ || !last_element_ || !last_element_->IsPseudoClassSet("hover"))
+            return;
+
+        tooltip_candidate_seen_ = true;
+        const auto now = std::chrono::steady_clock::now();
+        if (tooltip_hover_el_ != last_element_ || tooltip_text_ != text) {
+            tooltip_hover_el_ = last_element_;
+            tooltip_text_ = text;
+            tooltip_hover_started_at_ = now;
+        }
+
+        if (tooltip_hover_started_at_ == std::chrono::steady_clock::time_point{} ||
+            now - tooltip_hover_started_at_ < lfs::vis::gui::kRmlTooltipShowDelay)
             return;
 
         auto body_offset = doc_->GetAbsoluteOffset(Rml::BoxArea::Content);

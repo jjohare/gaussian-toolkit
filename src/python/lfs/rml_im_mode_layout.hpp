@@ -11,6 +11,7 @@
 #include <nanobind/nanobind.h>
 
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <optional>
@@ -440,6 +441,10 @@ namespace lfs::python {
 
         Rml::Element* tooltip_el_ = nullptr;
         bool tooltip_shown_ = false;
+        Rml::Element* tooltip_hover_el_ = nullptr;
+        std::string tooltip_text_;
+        std::chrono::steady_clock::time_point tooltip_hover_started_at_{};
+        bool tooltip_candidate_seen_ = false;
 
         std::unordered_map<std::string, bool> popup_open_;
         std::string active_popup_id_;

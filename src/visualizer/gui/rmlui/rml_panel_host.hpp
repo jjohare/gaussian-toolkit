@@ -51,7 +51,7 @@ namespace lfs::vis::gui {
         bool wantsKeyboard() const { return wants_keyboard_; }
 
         static std::string consumeFrameTooltip();
-        static void setFrameTooltip(const std::string& tip);
+        static void setFrameTooltip(const std::string& tip, const void* hover_target);
         static bool consumeFrameWantsKeyboard();
         static bool consumeFrameWantsTextInput();
         static void clearQueuedForegroundComposites();

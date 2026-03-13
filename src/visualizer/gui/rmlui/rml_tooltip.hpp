@@ -7,10 +7,13 @@
 #include "core/event_bridge/localization_manager.hpp"
 
 #include <RmlUi/Core/Element.h>
+#include <chrono>
 #include <string>
 #include <string_view>
 
 namespace lfs::vis::gui {
+
+    inline constexpr auto kRmlTooltipShowDelay = std::chrono::milliseconds(700);
 
     inline std::string resolveRmlTooltip(Rml::Element* hover) {
         for (auto* el = hover; el; el = el->GetParentNode()) {

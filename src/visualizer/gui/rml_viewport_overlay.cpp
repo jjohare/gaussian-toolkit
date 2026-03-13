@@ -212,7 +212,7 @@ namespace lfs::vis::gui {
                 rml_context_->ProcessMouseWheel(Rml::Vector2f(0.0f, -input.mouse_wheel), 0);
             }
 
-            RmlPanelHost::setFrameTooltip(resolveRmlTooltip(hover));
+            RmlPanelHost::setFrameTooltip(resolveRmlTooltip(hover), hover);
         }
     }
 
