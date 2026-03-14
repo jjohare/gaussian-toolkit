@@ -26,7 +26,7 @@
 namespace lfs::io {
     struct LoadParams;
     class PipelinedImageLoader;
-}
+} // namespace lfs::io
 
 namespace lfs::core {
     class Tensor;
