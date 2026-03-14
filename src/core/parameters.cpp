@@ -158,8 +158,8 @@ namespace lfs::core {
         }
 
         std::string OptimizationParameters::validate() const {
-            if (gut && strategy == "adc")
-                return "GUT and ADC strategy cannot be used together";
+            if (gut && (strategy == "adc" || strategy == "igs+"))
+                return "GUT and " + strategy + " strategy cannot be used together";
             return {};
         }
 

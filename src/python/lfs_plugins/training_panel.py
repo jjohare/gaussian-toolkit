@@ -918,15 +918,15 @@ class TrainingPanel(Panel):
         params = lf.optimization_params()
         if not params or not params.has_params():
             return
-        if val == "adc" and params.gut:
+        if val in ("adc", "igs+") and params.gut:
             btn_gut = tr("training.conflict.btn_disable_gut")
             btn_cancel = tr("training.conflict.btn_cancel")
 
-            def _on_conflict(button, _gut=btn_gut):
+            def _on_conflict(button, _gut=btn_gut, _val=val):
                 p = lf.optimization_params()
                 if button == _gut:
                     p.gut = False
-                    p.set_strategy("adc")
+                    p.set_strategy(_val)
                     if self._handle:
                         self._sync_text_bufs()
                         self._handle.dirty_all()
