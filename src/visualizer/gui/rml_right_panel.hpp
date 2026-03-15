@@ -30,8 +30,6 @@ namespace lfs::vis::gui {
         std::string id;
         std::string label;
         std::string dom_id;
-        std::string nav_left;
-        std::string nav_right;
         bool operator==(const TabSnapshot&) const = default;
     };
 
@@ -72,6 +70,7 @@ namespace lfs::vis::gui {
         bool updateTheme();
         std::string generateThemeRCSS(const lfs::vis::Theme& t) const;
         bool syncTabData(const std::vector<TabSnapshot>& tabs, const std::string& active_tab);
+        void syncTabNavigation();
 
         RmlUIManager* rml_manager_ = nullptr;
         Rml::Context* rml_context_ = nullptr;

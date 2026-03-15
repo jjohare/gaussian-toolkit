@@ -40,8 +40,6 @@ namespace lfs::vis::gui {
             h.RegisterMember("id", &TabSnapshot::id);
             h.RegisterMember("label", &TabSnapshot::label);
             h.RegisterMember("dom_id", &TabSnapshot::dom_id);
-            h.RegisterMember("nav_left", &TabSnapshot::nav_left);
-            h.RegisterMember("nav_right", &TabSnapshot::nav_right);
         }
         ctor.RegisterArray<std::vector<TabSnapshot>>();
         ctor.Bind("tabs", &tabs_);
@@ -172,6 +170,27 @@ namespace lfs::vis::gui {
         }
 
         return dirty;
+    }
+
+    void RmlRightPanel::syncTabNavigation() {
+        if (!document_)
+            return;
+
+        const std::size_t count = tabs_.size();
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto& tab = tabs_[i];
+            if (tab.dom_id.empty())
+                continue;
+
+            auto* button = document_->GetElementById(tab.dom_id);
+            if (!button)
+                continue;
+
+            const std::string left_id = "#" + tabs_[(i + count - 1) % count].dom_id;
+            const std::string right_id = "#" + tabs_[(i + 1) % count].dom_id;
+            button->SetProperty("nav-left", left_id);
+            button->SetProperty("nav-right", right_id);
+        }
     }
 
     static bool isOrHasAncestor(Rml::Element* el, const Rml::String& id) {
@@ -394,6 +413,7 @@ namespace lfs::vis::gui {
 
             rml_context_->SetDimensions(Rml::Vector2i(w, h));
             rml_context_->Update();
+            syncTabNavigation();
 
             fbo_.ensure(w, h);
             if (!fbo_.valid())

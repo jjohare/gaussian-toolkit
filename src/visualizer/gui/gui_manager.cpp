@@ -1156,10 +1156,6 @@ namespace lfs::vis::gui {
                     .id = t.id,
                     .label = t.label,
                     .dom_id = makeRmlTabDomId(t.id),
-                    .nav_left = "#" + makeRmlTabDomId(
-                                          main_tabs[(i + main_tabs.size() - 1) % main_tabs.size()].id),
-                    .nav_right = "#" + makeRmlTabDomId(
-                                           main_tabs[(i + 1) % main_tabs.size()].id),
                 });
             }
 

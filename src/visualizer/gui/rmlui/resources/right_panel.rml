@@ -11,8 +11,6 @@
                 class="tab"
                 data-attr-id="tab.dom_id"
                 data-class-active="tab.id == active_tab"
-                data-style-nav-left="tab.nav_left"
-                data-style-nav-right="tab.nav_right"
                 data-event-click="tab_click(tab.id)">
             {{ tab.label }}
         </button>
