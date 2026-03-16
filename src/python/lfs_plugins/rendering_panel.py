@@ -255,15 +255,15 @@ class RenderingPanel(Panel):
         model.bind_func("label_panel_title",
                          lambda: lf.ui.tr("rendering") or "Rendering")
         model.bind_func("label_hdr_viewport",
-                         lambda: lf.ui.tr("rendering_panel.section_viewport") or "Viewport")
+                         lambda: "Viewport")
         model.bind_func("label_hdr_camera",
-                         lambda: lf.ui.tr("rendering_panel.section_camera") or "Camera & Projection")
+                         lambda: "Camera & Projection")
         model.bind_func("label_hdr_selection",
-                         lambda: lf.ui.tr("rendering_panel.section_selection") or "Selection & Overlays")
+                         lambda: "Selection & Overlays")
         model.bind_func("label_hdr_mesh",
                          lambda: lf.ui.tr("main_panel.mesh") or "Mesh")
         model.bind_func("label_hdr_post_process",
-                         lambda: lf.ui.tr("rendering_panel.section_post_process") or "Post Processing")
+                         lambda: "Post Processing")
         model.bind_func("label_ppisp_color_balance",
                          lambda: _entry_label(
                              lf.ui.tr("main_panel.ppisp_color_balance") or "Color Correction"))

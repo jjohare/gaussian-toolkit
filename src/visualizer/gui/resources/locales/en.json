@@ -239,6 +239,7 @@
     "value.not_set": "(not set)",
     "options.strategy.mcmc": "MCMC",
     "options.strategy.adc": "ADC",
+    "options.strategy.igs_plus": "IGS+",
     "options.tile.full": "1 (Full)",
     "options.tile.half": "2 (Half)",
     "options.tile.quarter": "4 (Quarter)",
@@ -564,7 +565,10 @@
     "no_dataset_loaded": "No dataset loaded",
     "iters_per_sec": "iters/sec",
     "sparsity": "Sparsity Settings",
-    "pruning_growing": "Pruning/Growing"
+    "pruning_growing": "Pruning/Growing",
+    "color_red_prefix": "R:",
+    "color_green_prefix": "G:",
+    "color_blue_prefix": "B:"
   },
   "tooltip": {
     "gut_mode": "For fisheye/distorted/equirect cameras",
