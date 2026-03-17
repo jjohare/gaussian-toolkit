@@ -46,30 +46,40 @@ namespace {
 
     std::shared_ptr<lfs::core::PointCloud> make_test_point_cloud() {
         auto means = Tensor::from_vector(
-            std::vector<float>{0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f},
-            {size_t{2}, size_t{3}},
-            Device::CUDA).to(lfs::core::DataType::Float32);
+                         std::vector<float>{0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f},
+                         {size_t{2}, size_t{3}},
+                         Device::CUDA)
+                         .to(lfs::core::DataType::Float32);
         auto colors = Tensor::from_vector(
-            std::vector<float>{1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f},
-            {size_t{2}, size_t{3}},
-            Device::CUDA).to(lfs::core::DataType::Float32);
+                          std::vector<float>{1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f},
+                          {size_t{2}, size_t{3}},
+                          Device::CUDA)
+                          .to(lfs::core::DataType::Float32);
         return std::make_shared<lfs::core::PointCloud>(std::move(means), std::move(colors));
     }
 
     std::shared_ptr<lfs::core::MeshData> make_test_mesh() {
         auto mesh = std::make_shared<lfs::core::MeshData>();
         mesh->vertices = Tensor::from_vector(
-            std::vector<float>{
-                0.0f, 0.0f, 0.0f,
-                1.0f, 0.0f, 0.0f,
-                0.0f, 1.0f, 0.0f,
-            },
-            {size_t{3}, size_t{3}},
-            Device::CPU).to(lfs::core::DataType::Float32);
+                             std::vector<float>{
+                                 0.0f,
+                                 0.0f,
+                                 0.0f,
+                                 1.0f,
+                                 0.0f,
+                                 0.0f,
+                                 0.0f,
+                                 1.0f,
+                                 0.0f,
+                             },
+                             {size_t{3}, size_t{3}},
+                             Device::CPU)
+                             .to(lfs::core::DataType::Float32);
         mesh->indices = Tensor::from_vector(
-            std::vector<int>{0, 1, 2},
-            {size_t{1}, size_t{3}},
-            Device::CPU).to(lfs::core::DataType::Int32);
+                            std::vector<int>{0, 1, 2},
+                            {size_t{1}, size_t{3}},
+                            Device::CPU)
+                            .to(lfs::core::DataType::Int32);
         return mesh;
     }
 
@@ -159,39 +169,33 @@ TEST(VideoExportUtilsTest, CaptureSnapshotSupportsMeshOnlyScenes) {
 }
 
 TEST(VideoExportUtilsTest, ValidateVideoExportOptionsRejectsInvalidValues) {
-    EXPECT_FALSE(lfs::vis::gui::validateVideoExportOptions({
-        .width = 0,
-        .height = 1080,
-        .framerate = 30,
-        .crf = 18}));
-    EXPECT_FALSE(lfs::vis::gui::validateVideoExportOptions({
-        .width = 1920,
-        .height = -1,
-        .framerate = 30,
-        .crf = 18}));
-    EXPECT_FALSE(lfs::vis::gui::validateVideoExportOptions({
-        .width = 1920,
-        .height = 1080,
-        .framerate = 0,
-        .crf = 18}));
-    EXPECT_FALSE(lfs::vis::gui::validateVideoExportOptions({
-        .width = lfs::rendering::MAX_VIEWPORT_SIZE + 1,
-        .height = 1080,
-        .framerate = 30,
-        .crf = 18}));
-    EXPECT_FALSE(lfs::vis::gui::validateVideoExportOptions({
-        .width = 1920,
-        .height = 1080,
-        .framerate = 30,
-        .crf = 99}));
+    EXPECT_FALSE(lfs::vis::gui::validateVideoExportOptions({.width = 0,
+                                                            .height = 1080,
+                                                            .framerate = 30,
+                                                            .crf = 18}));
+    EXPECT_FALSE(lfs::vis::gui::validateVideoExportOptions({.width = 1920,
+                                                            .height = -1,
+                                                            .framerate = 30,
+                                                            .crf = 18}));
+    EXPECT_FALSE(lfs::vis::gui::validateVideoExportOptions({.width = 1920,
+                                                            .height = 1080,
+                                                            .framerate = 0,
+                                                            .crf = 18}));
+    EXPECT_FALSE(lfs::vis::gui::validateVideoExportOptions({.width = lfs::rendering::MAX_VIEWPORT_SIZE + 1,
+                                                            .height = 1080,
+                                                            .framerate = 30,
+                                                            .crf = 18}));
+    EXPECT_FALSE(lfs::vis::gui::validateVideoExportOptions({.width = 1920,
+                                                            .height = 1080,
+                                                            .framerate = 30,
+                                                            .crf = 99}));
 }
 
 TEST(VideoExportUtilsTest, ValidateVideoExportOptionsAcceptsTypicalPreset) {
-    auto result = lfs::vis::gui::validateVideoExportOptions({
-        .width = 1920,
-        .height = 1080,
-        .framerate = 30,
-        .crf = 18});
+    auto result = lfs::vis::gui::validateVideoExportOptions({.width = 1920,
+                                                             .height = 1080,
+                                                             .framerate = 30,
+                                                             .crf = 18});
 
     ASSERT_TRUE(result.has_value()) << result.error();
     EXPECT_EQ(result->width, 1920);
