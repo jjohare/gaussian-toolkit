@@ -197,6 +197,10 @@ namespace lfs::training {
 
             const int img_h = image.shape()[1];
             const int img_w = image.shape()[2];
+
+            if (cam->image_width() != img_w || cam->image_height() != img_h) {
+                cam->set_image_dimensions(img_w, img_h);
+            }
             if (view == 0 ||
                 img_h != static_cast<int>(canny_ws.nms_output.shape()[0]) ||
                 img_w != static_cast<int>(canny_ws.nms_output.shape()[1])) {
