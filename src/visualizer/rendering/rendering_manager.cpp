@@ -41,6 +41,16 @@
 namespace lfs::vis {
 
     namespace {
+        [[nodiscard]] std::optional<std::shared_lock<std::shared_mutex>> acquireLiveModelRenderLock(
+            const SceneManager* const scene_manager) {
+            std::optional<std::shared_lock<std::shared_mutex>> lock;
+            if (const auto* tm = scene_manager ? scene_manager->getTrainerManager() : nullptr) {
+                if (const auto* trainer = tm->getTrainer()) {
+                    lock.emplace(trainer->getRenderMutex());
+                }
+            }
+            return lock;
+        }
 
         template <typename TRenderable>
         [[nodiscard]] const TRenderable* findRenderableByNodeId(const std::vector<TRenderable>& renderables,
@@ -902,6 +912,7 @@ namespace lfs::vis {
         if (!initialized_ || !engine_)
             return false;
 
+        auto render_lock = acquireLiveModelRenderLock(scene_manager);
         const auto* const model = scene_manager ? scene_manager->getModelForRendering() : nullptr;
         const auto* const point_cloud =
             (scene_manager && (!model || model->size() == 0))
@@ -1005,19 +1016,6 @@ namespace lfs::vis {
             }
         }
 
-        const lfs::core::SplatData* const model = scene_manager ? scene_manager->getModelForRendering() : nullptr;
-        const auto* const visible_point_cloud =
-            (scene_manager && !model) ? scene_manager->getScene().getVisiblePointCloud() : nullptr;
-        const bool has_visible_point_cloud = visible_point_cloud && visible_point_cloud->size() > 0;
-        const size_t model_ptr = reinterpret_cast<size_t>(model);
-
-        if (model_ptr != last_model_ptr_) {
-            LOG_DEBUG("Model ptr changed: {} -> {}, size={}", last_model_ptr_, model_ptr, model ? model->size() : 0);
-            markDirty(DirtyFlag::ALL);
-            last_model_ptr_ = model_ptr;
-            cached_result_ = {};
-        }
-
         const bool is_training = scene_manager && scene_manager->hasDataset() &&
                                  scene_manager->getTrainerManager() &&
                                  scene_manager->getTrainerManager()->isRunning();
@@ -1033,14 +1031,14 @@ namespace lfs::vis {
         }
 
         if (settings_.split_view_mode == SplitViewMode::GTComparison) {
-            if (current_camera_id_ < 0 || (!model && !has_visible_point_cloud)) {
+            if (current_camera_id_ < 0) {
                 gt_context_.reset();
                 gt_context_camera_id_ = -1;
             } else {
                 gt_context_.reset();
                 gt_context_camera_id_ = -1;
 
-                if (auto* trainer_manager = scene_manager->getTrainerManager();
+                if (auto* trainer_manager = scene_manager ? scene_manager->getTrainerManager() : nullptr;
                     trainer_manager && trainer_manager->hasTrainer()) {
                     if (const auto* trainer = trainer_manager->getTrainer()) {
                         const auto loader_owner = trainer->getActiveImageLoader();
@@ -1092,6 +1090,28 @@ namespace lfs::vis {
             }
         }
 
+        auto render_lock = acquireLiveModelRenderLock(scene_manager);
+        const lfs::core::SplatData* const model = scene_manager ? scene_manager->getModelForRendering() : nullptr;
+        const auto* const visible_point_cloud =
+            (scene_manager && !model) ? scene_manager->getScene().getVisiblePointCloud() : nullptr;
+        const bool has_visible_point_cloud = visible_point_cloud && visible_point_cloud->size() > 0;
+        const size_t model_ptr = reinterpret_cast<size_t>(model);
+
+        if (settings_.split_view_mode == SplitViewMode::GTComparison &&
+            current_camera_id_ >= 0 &&
+            !model &&
+            !has_visible_point_cloud) {
+            gt_context_.reset();
+            gt_context_camera_id_ = -1;
+        }
+
+        if (model_ptr != last_model_ptr_) {
+            LOG_DEBUG("Model ptr changed: {} -> {}, size={}", last_model_ptr_, model_ptr, model ? model->size() : 0);
+            markDirty(DirtyFlag::ALL);
+            last_model_ptr_ = model_ptr;
+            cached_result_ = {};
+        }
+
         if (!cached_result_.image &&
             (model || has_visible_point_cloud || settings_.split_view_mode != SplitViewMode::Disabled))
             dirty_mask_.fetch_or(DirtyFlag::ALL, std::memory_order_relaxed);
@@ -1114,7 +1134,7 @@ namespace lfs::vis {
             glEnable(GL_SCISSOR_TEST);
         }
 
-        doFullRender(context, scene_manager, model);
+        doFullRender(context, scene_manager, model, render_lock.has_value());
 
         if (resize_completed) {
             resize_completed_ = true;
@@ -1133,7 +1153,8 @@ namespace lfs::vis {
     }
 
     void RenderingManager::doFullRender(const RenderContext& context, SceneManager* scene_manager,
-                                        const lfs::core::SplatData* model) {
+                                        const lfs::core::SplatData* model,
+                                        const bool render_lock_held) {
         LOG_TIMER_TRACE("RenderingManager::doFullRender");
 
         render_count_++;
@@ -1183,6 +1204,7 @@ namespace lfs::vis {
         const FrameContext frame_ctx{
             .viewport = context.viewport,
             .viewport_region = context.viewport_region,
+            .render_lock_held = render_lock_held,
             .scene_manager = scene_manager,
             .model = model,
             .scene_state = std::move(scene_state),

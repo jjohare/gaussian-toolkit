@@ -334,7 +334,8 @@ namespace lfs::vis {
         }
 
         void doFullRender(const RenderContext& context, SceneManager* scene_manager,
-                          const lfs::core::SplatData* model);
+                          const lfs::core::SplatData* model,
+                          bool render_lock_held);
         void setupEventHandlers();
 
         // Core components
