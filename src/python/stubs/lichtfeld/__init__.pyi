@@ -1405,6 +1405,13 @@ class OptimizationParams:
     def means_lr(self, arg: float, /) -> None: ...
 
     @property
+    def means_lr_end(self) -> float:
+        """Target end learning rate for gaussian positions"""
+
+    @means_lr_end.setter
+    def means_lr_end(self, arg: float, /) -> None: ...
+
+    @property
     def shs_lr(self) -> float:
         """Learning rate for spherical harmonics"""
 
@@ -1424,6 +1431,13 @@ class OptimizationParams:
 
     @scaling_lr.setter
     def scaling_lr(self, arg: float, /) -> None: ...
+
+    @property
+    def scaling_lr_end(self) -> float:
+        """Target end learning rate for gaussian scales"""
+
+    @scaling_lr_end.setter
+    def scaling_lr_end(self, arg: float, /) -> None: ...
 
     @property
     def rotation_lr(self) -> float:
@@ -1458,7 +1472,7 @@ class OptimizationParams:
         """Active optimization strategy name"""
 
     def set_strategy(self, strategy: str) -> None:
-        """Set active strategy ('mcmc', 'adc', or 'igs+')"""
+        """Set active strategy ('mcmc', 'adc', 'lfs', or 'igs+')"""
 
     @property
     def headless(self) -> bool:
@@ -1482,7 +1496,7 @@ class OptimizationParams:
         """Set steps_scaler and scale all step-related parameters by the ratio"""
 
     def auto_scale_steps(self, image_count: int) -> None:
-        """Auto-scale steps for both strategies based on image count"""
+        """Auto-scale steps for all strategies based on image count"""
 
     @property
     def gut(self) -> bool:

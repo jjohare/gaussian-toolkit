@@ -30,6 +30,7 @@
 #include "strategies/adc.hpp"
 #include "strategies/mcmc.hpp"
 #include "strategies/strategy_factory.hpp"
+#include "training/kernels/lfs_kernels.hpp"
 #include "training/kernels/grad_alpha.hpp"
 
 #include <filesystem>
@@ -1514,9 +1515,16 @@ namespace lfs::training {
                                              ppisp_cam_idx >= 0 &&
                                              ppisp_cam_idx < ppisp_controller_pool_->num_cameras();
             const bool use_pixel_error_densification =
-                (params_.optimization.strategy == "mcmc" ||
-                 params_.optimization.strategy == "igs+");
+                (params_.optimization.strategy == "mcmc") ||
+                (params_.optimization.strategy == "igs+") ||
+                (params_.optimization.strategy == "lfs" &&
+                 params_.optimization.use_error_map);
             const bool use_ssim_error = use_pixel_error_densification;
+            DensificationType densification_type = DensificationType::None;
+            if (params_.optimization.strategy == "mcmc")
+                densification_type = DensificationType::MCMC;
+            else if (params_.optimization.strategy == "lfs")
+                densification_type = DensificationType::LFS;
 
             // Loop over tiles (row-major order)
             for (int tile_idx = 0; tile_idx < num_tiles; ++tile_idx) {
@@ -1821,7 +1829,9 @@ namespace lfs::training {
                                 if (!densification_error_map_.is_valid() ||
                                     densification_error_map_.shape()[0] != H ||
                                     densification_error_map_.shape()[1] != W) {
-                                    densification_error_map_ = core::Tensor::empty({H, W}, core::Device::CUDA);
+                                    densification_error_map_ = core::Tensor::empty(
+                                        {static_cast<size_t>(H), static_cast<size_t>(W)},
+                                        core::Device::CUDA);
                                 }
                                 lfs::training::kernels::launch_ssim_to_error_map(ssim_map, densification_error_map_);
                                 tile_error_map = densification_error_map_;
@@ -1855,6 +1865,12 @@ namespace lfs::training {
                              params_.optimization.mask_mode == lfs::core::param::MaskMode::Ignore)) {
                             tile_error_map = (tile_error_map * mask_tile).contiguous();
                         }
+                    }
+
+                    if (tile_error_map.is_valid() && params_.optimization.strategy == "lfs") {
+                        const float map_mean = tile_error_map.mean().item();
+                        if (map_mean > 1e-6f)
+                            tile_error_map = (tile_error_map / map_mean).contiguous();
                     }
 
                     loss_tensor_gpu = loss_tensor_gpu + tile_loss;
@@ -1892,7 +1908,8 @@ namespace lfs::training {
                     } else {
                         fast_rasterize_backward(*fast_ctx, raster_grad, strategy_->get_model(),
                                                 strategy_->get_optimizer(), tile_grad_alpha,
-                                                use_pixel_error_densification ? tile_error_map : lfs::core::Tensor{});
+                                                use_pixel_error_densification ? tile_error_map : lfs::core::Tensor{},
+                                                densification_type);
                     }
                     nvtxRangePop();
                 }
