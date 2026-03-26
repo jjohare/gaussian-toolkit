@@ -187,14 +187,14 @@ namespace lfs::training::kernels {
     // ============================================================================
 
     struct MaskedFusedL1SSIMWorkspace {
-        lfs::core::Tensor ssim_map;      // [N, C, H, W] per-pixel SSIM values (optional output)
-        lfs::core::Tensor dm_dmu1;       // [N, C, H, W]
-        lfs::core::Tensor dm_dsigma1_sq; // [N, C, H, W]
-        lfs::core::Tensor dm_dsigma12;   // [N, C, H, W]
-        lfs::core::Tensor grad_img;      // [N, C, H, W]
+        lfs::core::Tensor ssim_map;       // [N, C, H, W] per-pixel SSIM values (optional output)
+        lfs::core::Tensor dm_dmu1;        // [N, C, H, W]
+        lfs::core::Tensor dm_dsigma1_sq;  // [N, C, H, W]
+        lfs::core::Tensor dm_dsigma12;    // [N, C, H, W]
+        lfs::core::Tensor grad_img;       // [N, C, H, W]
         lfs::core::Tensor reduction_temp; // [<=2048], split into loss and mask partial sums
-        lfs::core::Tensor masked_loss;   // [1] scalar
-        lfs::core::Tensor mask_sum;      // [1] scalar
+        lfs::core::Tensor masked_loss;    // [1] scalar
+        lfs::core::Tensor mask_sum;       // [1] scalar
 
         std::vector<size_t> allocated_shape;
 
