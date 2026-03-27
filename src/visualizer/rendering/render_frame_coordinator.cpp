@@ -12,6 +12,7 @@
 #include "render_pass.hpp"
 #include "scene/scene_manager.hpp"
 #include "scene/scene_render_state.hpp"
+#include <vector>
 #include <glad/glad.h>
 #include <string_view>
 
@@ -34,6 +35,51 @@ namespace lfs::vis {
 
             lfs::core::ScopedTimer timer(std::move(timer_name));
             pass.execute(engine, frame_ctx, resources);
+        }
+
+        [[nodiscard]] std::vector<FrameViewPanel> buildFrameViewPanels(
+            const RenderFrameCoordinator::Context& context,
+            const SplitViewService& split_view_service,
+            const glm::ivec2& render_size) {
+            std::vector<FrameViewPanel> panels;
+            if (render_size.x <= 0 || render_size.y <= 0) {
+                return panels;
+            }
+
+            panels.push_back({
+                .panel = SplitViewPanelId::Left,
+                .viewport = &context.viewport,
+                .render_size = render_size,
+                .viewport_offset = {0, 0},
+                .start_position = 0.0f,
+                .end_position = 1.0f,
+            });
+
+            const auto layouts = split_view_service.panelLayouts(context.settings, render_size.x);
+            if (!layouts || render_size.x <= 1 || render_size.y <= 0) {
+                return panels;
+            }
+
+            panels.clear();
+            panels.reserve(layouts->size());
+
+            panels.push_back({
+                .panel = SplitViewPanelId::Left,
+                .viewport = &context.viewport,
+                .render_size = {std::max((*layouts)[0].width, 1), render_size.y},
+                .viewport_offset = {(*layouts)[0].x, 0},
+                .start_position = (*layouts)[0].start_position,
+                .end_position = (*layouts)[0].end_position,
+            });
+            panels.push_back({
+                .panel = SplitViewPanelId::Right,
+                .viewport = &split_view_service.secondaryViewport(),
+                .render_size = {std::max((*layouts)[1].width, 1), render_size.y},
+                .viewport_offset = {(*layouts)[1].x, 0},
+                .start_position = (*layouts)[1].start_position,
+                .end_position = (*layouts)[1].end_position,
+            });
+            return panels;
         }
 
     } // namespace
@@ -76,40 +122,37 @@ namespace lfs::vis {
             dependencies_.pass_graph.resetPointCloudCache();
         }
 
-        lfs::rendering::ViewportData primary_viewport_data = {
-            .rotation = context.viewport.getRotationMatrix(),
-            .translation = context.viewport.getTranslation(),
-            .size = render_size,
-            .focal_length_mm = context.settings.focal_length_mm,
-            .orthographic = context.settings.orthographic,
-            .ortho_scale = context.settings.ortho_scale};
-        std::optional<lfs::rendering::ViewportData> secondary_viewport_data;
-        const bool independent_split_active =
-            context.settings.split_view_mode == SplitViewMode::IndependentDual &&
-            context.secondary_viewport &&
-            render_size.x > 1 &&
-            render_size.y > 0;
-        if (independent_split_active) {
-            const auto layouts = makeSplitViewPanelLayouts(render_size.x, context.settings.split_position);
-            primary_viewport_data.size = {std::max(layouts[0].width, 1), render_size.y};
-            secondary_viewport_data = lfs::rendering::ViewportData{
-                .rotation = context.secondary_viewport->getRotationMatrix(),
-                .translation = context.secondary_viewport->getTranslation(),
-                .size = {std::max(layouts[1].width, 1), render_size.y},
-                .focal_length_mm = context.settings.focal_length_mm,
-                .orthographic = context.settings.orthographic,
-                .ortho_scale = context.settings.ortho_scale};
+        const auto view_panels = buildFrameViewPanels(context, dependencies_.split_view_service, render_size);
+        if (view_panels.empty()) {
+            return Result{};
         }
-        dependencies_.viewport_interaction_context.updatePickContext(
-            context.viewport_region,
-            primary_viewport_data,
-            secondary_viewport_data ? &*secondary_viewport_data : nullptr,
-            independent_split_active,
-            context.settings.split_position);
+
+        std::vector<ViewportInteractionPanel> interaction_panels;
+        interaction_panels.reserve(view_panels.size());
+        for (const auto& panel : view_panels) {
+            if (!panel.valid()) {
+                continue;
+            }
+            interaction_panels.push_back({
+                .panel = panel.panel,
+                .viewport_data =
+                    {.rotation = panel.viewport->getRotationMatrix(),
+                     .translation = panel.viewport->getTranslation(),
+                     .size = panel.render_size,
+                     .focal_length_mm = context.settings.focal_length_mm,
+                     .orthographic = context.settings.orthographic,
+                     .ortho_scale = context.settings.ortho_scale},
+                .viewport_pos =
+                    glm::vec2(static_cast<float>(viewport_pos.x + panel.viewport_offset.x),
+                              static_cast<float>(viewport_pos.y + panel.viewport_offset.y)),
+                .viewport_size =
+                    glm::vec2(static_cast<float>(panel.render_size.x), static_cast<float>(panel.render_size.y)),
+            });
+        }
+        dependencies_.viewport_interaction_context.updatePickContext(interaction_panels);
 
         const FrameContext frame_ctx{
             .viewport = context.viewport,
-            .secondary_viewport = context.secondary_viewport,
             .viewport_region = context.viewport_region,
             .render_lock_held = context.render_lock_held,
             .scene_manager = context.scene_manager,
@@ -124,7 +167,8 @@ namespace lfs::vis {
             .hovered_camera_id = context.hovered_camera_id,
             .current_camera_id = context.current_camera_id,
             .hovered_gaussian_id = dependencies_.viewport_overlay.hoveredGaussianId(),
-            .selection_flash_intensity = context.selection_flash_intensity};
+            .selection_flash_intensity = context.selection_flash_intensity,
+            .view_panels = view_panels};
 
         FrameResources resources{
             .cached_metadata = dependencies_.viewport_artifacts.cachedMetadata(),
@@ -147,7 +191,7 @@ namespace lfs::vis {
             }
         }
 
-        if (frame_ctx.settings.split_view_mode == SplitViewMode::GTComparison &&
+        if (splitViewUsesGTComparison(frame_ctx.settings.split_view_mode) &&
             resources.gt_context && resources.gt_context->valid()) {
             auto* const splat_raster_pass = dependencies_.pass_graph.splatRasterPass();
             auto* const point_cloud_pass = dependencies_.pass_graph.pointCloudPass();

@@ -93,22 +93,24 @@ namespace lfs::vis::gui {
             }
 
             if (const auto left_panel = rendering_manager->resolveViewerPanel(
+                    viewer->getViewport(),
                     viewport_pos, viewport_size, std::nullopt, SplitViewPanelId::Left);
                 left_panel && left_panel->valid()) {
-                panels.push_back({
+                panels.push_back(ViewportGizmoPanelTarget{
                     .panel = SplitViewPanelId::Left,
-                    .viewport = &viewer->getViewport(),
+                    .viewport = const_cast<Viewport*>(left_panel->viewport),
                     .pos = {left_panel->x, left_panel->y},
                     .size = {left_panel->width, left_panel->height},
                 });
             }
 
             if (const auto right_panel = rendering_manager->resolveViewerPanel(
+                    viewer->getViewport(),
                     viewport_pos, viewport_size, std::nullopt, SplitViewPanelId::Right);
                 right_panel && right_panel->valid()) {
-                panels.push_back({
+                panels.push_back(ViewportGizmoPanelTarget{
                     .panel = SplitViewPanelId::Right,
-                    .viewport = &rendering_manager->getIndependentSplitViewport(),
+                    .viewport = const_cast<Viewport*>(right_panel->viewport),
                     .pos = {right_panel->x, right_panel->y},
                     .size = {right_panel->width, right_panel->height},
                 });

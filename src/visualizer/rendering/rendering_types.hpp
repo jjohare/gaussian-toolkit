@@ -28,6 +28,26 @@ namespace lfs::vis {
         Right = 1
     };
 
+    [[nodiscard]] inline bool splitViewEnabled(const SplitViewMode mode) {
+        return mode != SplitViewMode::Disabled;
+    }
+
+    [[nodiscard]] inline bool splitViewUsesComparisonPanels(const SplitViewMode mode) {
+        return mode == SplitViewMode::PLYComparison || mode == SplitViewMode::GTComparison;
+    }
+
+    [[nodiscard]] inline bool splitViewUsesPLYComparison(const SplitViewMode mode) {
+        return mode == SplitViewMode::PLYComparison;
+    }
+
+    [[nodiscard]] inline bool splitViewUsesGTComparison(const SplitViewMode mode) {
+        return mode == SplitViewMode::GTComparison;
+    }
+
+    [[nodiscard]] inline bool splitViewUsesIndependentPanels(const SplitViewMode mode) {
+        return mode == SplitViewMode::IndependentDual;
+    }
+
     struct SplitViewPanelLayout {
         SplitViewPanelId panel = SplitViewPanelId::Left;
         int x = 0;
@@ -210,6 +230,8 @@ namespace lfs::vis {
 
     struct SplitViewInfo {
         bool enabled = false;
+        std::string mode_label;
+        std::string detail_label;
         std::string left_name;
         std::string right_name;
     };

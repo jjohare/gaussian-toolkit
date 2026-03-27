@@ -121,14 +121,24 @@ namespace lfs::vis {
 
         void advanceSplitOffset();
         SplitViewInfo getSplitViewInfo() const;
+        [[nodiscard]] bool isSplitViewActive() const;
+        [[nodiscard]] bool isGTComparisonActive() const;
         [[nodiscard]] bool isIndependentSplitViewActive() const;
+        [[nodiscard]] float getSplitPosition() const;
+        [[nodiscard]] std::optional<float> getSplitDividerScreenX(const glm::vec2& viewport_pos,
+                                                                  const glm::vec2& viewport_size) const;
         void setFocusedSplitPanel(SplitViewPanelId panel) { split_view_service_.setFocusedPanel(panel); }
         [[nodiscard]] SplitViewPanelId getFocusedSplitPanel() const { return split_view_service_.focusedPanel(); }
-        [[nodiscard]] Viewport& getIndependentSplitViewport() { return split_view_service_.secondaryViewport(); }
-        [[nodiscard]] const Viewport* getIndependentSplitViewportOrNull() const;
+        [[nodiscard]] Viewport& resolvePanelViewport(Viewport& primary_viewport,
+                                                     SplitViewPanelId panel = SplitViewPanelId::Left);
+        [[nodiscard]] const Viewport& resolvePanelViewport(const Viewport& primary_viewport,
+                                                           SplitViewPanelId panel = SplitViewPanelId::Left) const;
+        [[nodiscard]] Viewport& resolveFocusedViewport(Viewport& primary_viewport);
+        [[nodiscard]] const Viewport& resolveFocusedViewport(const Viewport& primary_viewport) const;
 
         struct ViewerPanelInfo {
             SplitViewPanelId panel = SplitViewPanelId::Left;
+            const Viewport* viewport = nullptr;
             float x = 0.0f;
             float y = 0.0f;
             float width = 0.0f;
@@ -137,10 +147,15 @@ namespace lfs::vis {
             int render_height = 0;
 
             [[nodiscard]] bool valid() const {
-                return width > 0.0f && height > 0.0f && render_width > 0 && render_height > 0;
+                return viewport != nullptr &&
+                       width > 0.0f &&
+                       height > 0.0f &&
+                       render_width > 0 &&
+                       render_height > 0;
             }
         };
         [[nodiscard]] std::optional<ViewerPanelInfo> resolveViewerPanel(
+            const Viewport& primary_viewport,
             const glm::vec2& viewport_pos,
             const glm::vec2& viewport_size,
             std::optional<glm::vec2> screen_point = std::nullopt,
@@ -291,6 +306,7 @@ namespace lfs::vis {
         bool consumeResizeCompleted() { return frame_lifecycle_service_.consumeResizeCompleted(); }
 
     private:
+        void applySplitModeChange(const SplitViewService::ModeChangeResult& result);
         void setupEventHandlers();
         void handleToggleSplitView();
         void handleToggleIndependentSplitView(const lfs::core::events::cmd::ToggleIndependentSplitView& event);

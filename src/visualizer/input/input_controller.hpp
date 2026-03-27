@@ -217,7 +217,6 @@ namespace lfs::vis {
         bool training_was_paused_by_camera_ = false;
         std::chrono::steady_clock::time_point last_camera_movement_time_;
         static constexpr auto camera_movement_timeout_ = std::chrono::milliseconds(500);
-        bool gt_comparison_active_ = false;
 
         // Frame timing for WASD movement
         std::chrono::high_resolution_clock::time_point last_frame_time_;
@@ -258,7 +257,6 @@ namespace lfs::vis {
         std::size_t reset_camera_handler_id_ = 0;
         std::size_t dataset_load_completed_handler_id_ = 0;
         std::size_t window_focus_lost_handler_id_ = 0;
-        std::size_t gt_comparison_mode_changed_handler_id_ = 0;
 
         input::InputRouter* input_router_ = nullptr;
         static InputController* instance_;

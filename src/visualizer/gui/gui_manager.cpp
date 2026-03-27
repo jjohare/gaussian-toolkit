@@ -1213,11 +1213,13 @@ namespace lfs::vis::gui {
         if (auto* const rendering = viewer_ ? viewer_->getRenderingManager() : nullptr;
             rendering && rendering->isIndependentSplitViewActive()) {
             if (const auto primary_panel = rendering->resolveViewerPanel(
+                    viewer_->getViewport(),
                     viewport_layout_.pos, viewport_layout_.size, std::nullopt, SplitViewPanelId::Left)) {
                 primary_toolbar_x = primary_panel->x - viewport_layout_.pos.x;
                 primary_toolbar_width = primary_panel->width;
             }
             if (const auto secondary_panel = rendering->resolveViewerPanel(
+                    viewer_->getViewport(),
                     viewport_layout_.pos, viewport_layout_.size, std::nullopt, SplitViewPanelId::Right)) {
                 show_secondary_toolbar = secondary_panel->valid();
                 secondary_toolbar_x = secondary_panel->x - viewport_layout_.pos.x;
@@ -1244,6 +1246,7 @@ namespace lfs::vis::gui {
             if (auto* const rendering = viewer_ ? viewer_->getRenderingManager() : nullptr;
                 rendering && rendering->isIndependentSplitViewActive()) {
                 if (const auto target_panel = rendering->resolveViewerPanel(
+                        viewer_->getViewport(),
                         viewport_layout_.pos,
                         viewport_layout_.size,
                         glm::vec2(panel_input.mouse_x, panel_input.mouse_y))) {
@@ -1398,6 +1401,7 @@ namespace lfs::vis::gui {
                 }
 
                 const auto info = rm->resolveViewerPanel(
+                    ctx.viewer->getViewport(),
                     {viewport_layout_.pos.x, viewport_layout_.pos.y},
                     {viewport_layout_.size.x, viewport_layout_.size.y},
                     std::nullopt,
@@ -1412,9 +1416,7 @@ namespace lfs::vis::gui {
                 panel_ctx.height = info->height;
                 panel_ctx.render_width = info->render_width;
                 panel_ctx.render_height = info->render_height;
-                if (*panel == SplitViewPanelId::Right) {
-                    panel_ctx.viewport = rm->getIndependentSplitViewportOrNull();
-                }
+                panel_ctx.viewport = info->viewport;
                 return panel_ctx;
             };
             const auto render_to_screen = [&](const PreviewPanelContext& panel_ctx, const float x, const float y) {
@@ -1707,20 +1709,22 @@ namespace lfs::vis::gui {
             return;
         }
 
-        const auto& settings = rendering->getSettings();
-        if (settings.split_view_mode == SplitViewMode::Disabled) {
+        if (!rendering->isSplitViewActive()) {
             return;
         }
 
         const auto& t = theme();
         auto* const draw_list = ImGui::GetBackgroundDrawList(ImGui::GetMainViewport());
-        const float divider_x = viewport_layout_.pos.x + settings.split_position * viewport_layout_.size.x;
+        const auto divider_x = rendering->getSplitDividerScreenX(viewport_layout_.pos, viewport_layout_.size);
+        if (!divider_x) {
+            return;
+        }
         constexpr float kSplitDividerMinWidthPx = 10.0f;
         const float divider_width =
             std::max(kSplitDividerMinWidthPx * current_ui_scale_,
                      std::round(t.viewport.border_size * current_ui_scale_ * 4.0f));
-        const float divider_left = std::round(divider_x - divider_width * 0.5f);
-        const float divider_right = std::round(divider_x + divider_width * 0.5f);
+        const float divider_left = std::round(*divider_x - divider_width * 0.5f);
+        const float divider_right = std::round(*divider_x + divider_width * 0.5f);
         const ImU32 divider_fill_color = toU32(t.menu_background());
 
         draw_list->PushClipRect(

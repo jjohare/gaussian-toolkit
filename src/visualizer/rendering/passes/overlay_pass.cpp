@@ -7,7 +7,6 @@
 #include "rendering/gl_state_guard.hpp"
 #include "scene/scene_manager.hpp"
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <glad/glad.h>
 #include <unordered_set>
@@ -212,8 +211,7 @@ namespace lfs::vis {
             }
 
             if (settings.show_grid &&
-                (settings.split_view_mode == SplitViewMode::Disabled ||
-                 settings.split_view_mode == SplitViewMode::IndependentDual) &&
+                (!splitViewUsesComparisonPanels(settings.split_view_mode)) &&
                 !settings.equirectangular) {
                 if (const auto result = engine.renderGrid(
                         viewport,
@@ -225,26 +223,25 @@ namespace lfs::vis {
             }
         };
 
-        if (settings.split_view_mode == SplitViewMode::IndependentDual &&
-            ctx.secondary_viewport &&
-            ctx.render_size.x > 1 &&
-            ctx.render_size.y > 0) {
-            const auto layouts = makeSplitViewPanelLayouts(ctx.render_size.x, settings.split_position);
+        if (ctx.view_panels.size() > 1 && ctx.render_size.x > 1 && ctx.render_size.y > 0) {
             lfs::rendering::GLViewportGuard viewport_guard;
             lfs::rendering::GLScissorEnableGuard scissor_guard;
             glEnable(GL_SCISSOR_TEST);
 
-            const std::array<const Viewport*, 2> panel_viewports{&ctx.viewport, ctx.secondary_viewport};
-            for (size_t i = 0; i < layouts.size(); ++i) {
-                const auto& layout = layouts[i];
-                if (layout.width <= 0) {
+            for (const auto& panel : ctx.view_panels) {
+                if (!panel.valid()) {
                     continue;
                 }
 
-                glViewport(ctx.viewport_pos.x + layout.x, ctx.viewport_pos.y, layout.width, ctx.render_size.y);
-                glScissor(ctx.viewport_pos.x + layout.x, ctx.viewport_pos.y, layout.width, ctx.render_size.y);
-                render_overlays(*panel_viewports[i],
-                                ctx.makeViewportData(*panel_viewports[i], {layout.width, ctx.render_size.y}));
+                glViewport(ctx.viewport_pos.x + panel.viewport_offset.x,
+                           ctx.viewport_pos.y + panel.viewport_offset.y,
+                           panel.render_size.x,
+                           panel.render_size.y);
+                glScissor(ctx.viewport_pos.x + panel.viewport_offset.x,
+                          ctx.viewport_pos.y + panel.viewport_offset.y,
+                          panel.render_size.x,
+                          panel.render_size.y);
+                render_overlays(*panel.viewport, ctx.makeViewportData(panel));
             }
             return;
         }

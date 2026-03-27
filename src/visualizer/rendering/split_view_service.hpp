@@ -17,20 +17,29 @@ namespace lfs::vis {
 
     class LFS_VIS_API SplitViewService {
     public:
-        struct GTToggleResult {
-            bool enabled = false;
+        struct ModeChangeResult {
+            SplitViewMode previous_mode = SplitViewMode::Disabled;
+            SplitViewMode current_mode = SplitViewMode::Disabled;
+            bool mode_changed = false;
+            bool clear_viewport_output = false;
             std::optional<bool> restore_equirectangular;
         };
 
         [[nodiscard]] std::optional<glm::ivec2> gtContentDimensions() const;
         [[nodiscard]] const std::optional<GTComparisonContext>& gtContext() const { return gt_context_; }
+        [[nodiscard]] bool isActive(const RenderSettings& settings) const;
+        [[nodiscard]] bool isGTComparisonActive(const RenderSettings& settings) const;
+        [[nodiscard]] bool isIndependentDualActive(const RenderSettings& settings) const;
+        [[nodiscard]] std::optional<std::array<SplitViewPanelLayout, 2>>
+        panelLayouts(const RenderSettings& settings, int total_width) const;
+        [[nodiscard]] std::optional<int> dividerPixel(const RenderSettings& settings, int total_width) const;
 
-        [[nodiscard]] bool togglePLYComparison(RenderSettings& settings);
-        [[nodiscard]] bool toggleIndependentDual(RenderSettings& settings, const Viewport& primary_viewport);
-        [[nodiscard]] GTToggleResult toggleGTComparison(RenderSettings& settings);
-        void handleSceneLoaded(RenderSettings& settings);
-        void handleSceneCleared(RenderSettings& settings);
-        [[nodiscard]] bool handlePLYRemoved(RenderSettings& settings, SceneManager* scene_manager);
+        [[nodiscard]] ModeChangeResult toggleMode(RenderSettings& settings,
+                                                  SplitViewMode target_mode,
+                                                  const Viewport* primary_viewport = nullptr);
+        [[nodiscard]] ModeChangeResult handleSceneLoaded(RenderSettings& settings);
+        [[nodiscard]] ModeChangeResult handleSceneCleared(RenderSettings& settings);
+        [[nodiscard]] ModeChangeResult handlePLYRemoved(RenderSettings& settings, SceneManager* scene_manager);
         void advanceSplitOffset(RenderSettings& settings);
         [[nodiscard]] SplitViewInfo getInfo() const;
         void setFocusedPanel(SplitViewPanelId panel) { focused_panel_ = panel; }
@@ -47,7 +56,16 @@ namespace lfs::vis {
                                         bool& request_viewport_prerender);
 
     private:
+        enum class GTExitBehavior {
+            PreserveCurrent,
+            RestorePrevious
+        };
+
         [[nodiscard]] bool hasValidGTContext() const;
+        [[nodiscard]] ModeChangeResult transitionToMode(RenderSettings& settings,
+                                                        SplitViewMode target_mode,
+                                                        const Viewport* primary_viewport,
+                                                        GTExitBehavior gt_exit_behavior);
         void clear();
         void clearGTContext();
 

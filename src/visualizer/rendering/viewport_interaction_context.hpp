@@ -6,44 +6,80 @@
 
 #include "rendering/rendering.hpp"
 #include "rendering_types.hpp"
+#include <array>
+#include <optional>
+#include <span>
 
 namespace lfs::vis {
 
     class SceneManager;
 
+    struct ViewportInteractionPanel {
+        SplitViewPanelId panel = SplitViewPanelId::Left;
+        lfs::rendering::ViewportData viewport_data{};
+        glm::vec2 viewport_pos{0.0f};
+        glm::vec2 viewport_size{0.0f};
+
+        [[nodiscard]] bool valid() const {
+            return viewport_size.x > 0.0f && viewport_size.y > 0.0f;
+        }
+
+        [[nodiscard]] bool contains(const glm::vec2& screen_point) const {
+            return screen_point.x >= viewport_pos.x &&
+                   screen_point.y >= viewport_pos.y &&
+                   screen_point.x < viewport_pos.x + viewport_size.x &&
+                   screen_point.y < viewport_pos.y + viewport_size.y;
+        }
+    };
+
     struct ViewportInteractionContext {
         SceneManager* scene_manager = nullptr;
-        lfs::rendering::ViewportData viewport_data{};
-        lfs::rendering::ViewportData secondary_viewport_data{};
-        ViewportRegion viewport_region{};
+        std::array<ViewportInteractionPanel, 2> panels{};
+        size_t panel_count = 0;
         bool pick_context_valid = false;
-        bool secondary_viewport_valid = false;
-        bool independent_split_active = false;
-        float split_position = 0.5f;
 
-        void updatePickContext(const ViewportRegion* region,
-                               const lfs::rendering::ViewportData& data,
-                               const lfs::rendering::ViewportData* secondary_data = nullptr,
-                               const bool independent_split = false,
-                               const float split_pos = 0.5f) {
-            if (region) {
-                viewport_region = *region;
-                viewport_data = data;
-                if (secondary_data) {
-                    secondary_viewport_data = *secondary_data;
-                    secondary_viewport_valid = true;
-                } else {
-                    secondary_viewport_data = {};
-                    secondary_viewport_valid = false;
+        [[nodiscard]] const ViewportInteractionPanel* findPanel(const SplitViewPanelId panel_id) const {
+            for (size_t i = 0; i < panel_count; ++i) {
+                if (panels[i].panel == panel_id && panels[i].valid()) {
+                    return &panels[i];
                 }
-                independent_split_active = independent_split;
-                split_position = split_pos;
-                pick_context_valid = true;
-            } else {
-                pick_context_valid = false;
-                secondary_viewport_valid = false;
-                independent_split_active = false;
             }
+            return nullptr;
+        }
+
+        [[nodiscard]] const ViewportInteractionPanel* resolvePanel(
+            const glm::vec2& screen_point,
+            const std::optional<SplitViewPanelId> panel_override = std::nullopt) const {
+            if (!pick_context_valid || panel_count == 0) {
+                return nullptr;
+            }
+            if (panel_override) {
+                return findPanel(*panel_override);
+            }
+            for (size_t i = 0; i < panel_count; ++i) {
+                if (panels[i].valid() && panels[i].contains(screen_point)) {
+                    return &panels[i];
+                }
+            }
+            return nullptr;
+        }
+
+        void updatePickContext(const std::span<const ViewportInteractionPanel> active_panels) {
+            panel_count = 0;
+            pick_context_valid = false;
+
+            for (size_t i = 0; i < active_panels.size() && i < panels.size(); ++i) {
+                if (!active_panels[i].valid()) {
+                    continue;
+                }
+                panels[panel_count++] = active_panels[i];
+            }
+
+            for (size_t i = panel_count; i < panels.size(); ++i) {
+                panels[i] = {};
+            }
+
+            pick_context_valid = panel_count > 0;
         }
     };
 

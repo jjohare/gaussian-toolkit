@@ -56,14 +56,18 @@ namespace lfs::vis {
         RenderSettings settings;
         settings.equirectangular = true;
 
-        const auto enable = service.toggleGTComparison(settings);
-        EXPECT_TRUE(enable.enabled);
+        const auto enable = service.toggleMode(settings, SplitViewMode::GTComparison);
+        EXPECT_TRUE(enable.mode_changed);
+        EXPECT_EQ(enable.previous_mode, SplitViewMode::Disabled);
+        EXPECT_EQ(enable.current_mode, SplitViewMode::GTComparison);
         EXPECT_EQ(settings.split_view_mode, SplitViewMode::GTComparison);
 
         settings.equirectangular = false;
 
-        const auto disable = service.toggleGTComparison(settings);
-        EXPECT_FALSE(disable.enabled);
+        const auto disable = service.toggleMode(settings, SplitViewMode::GTComparison);
+        EXPECT_TRUE(disable.mode_changed);
+        EXPECT_EQ(disable.previous_mode, SplitViewMode::GTComparison);
+        EXPECT_EQ(disable.current_mode, SplitViewMode::Disabled);
         ASSERT_TRUE(disable.restore_equirectangular.has_value());
         EXPECT_TRUE(*disable.restore_equirectangular);
         EXPECT_TRUE(settings.equirectangular);
@@ -98,8 +102,9 @@ namespace lfs::vis {
         settings.split_view_mode = SplitViewMode::PLYComparison;
         settings.split_view_offset = 3;
 
-        service.handleSceneCleared(settings);
+        const auto result = service.handleSceneCleared(settings);
 
+        EXPECT_TRUE(result.mode_changed);
         EXPECT_EQ(settings.split_view_mode, SplitViewMode::Disabled);
         EXPECT_EQ(settings.split_view_offset, 0);
     }
@@ -230,11 +235,7 @@ namespace lfs::vis {
         EXPECT_TRUE(point_cloud_pass.shouldExecute(DirtyFlag::SPLATS, ctx));
     }
 
-    TEST_F(RenderingManagerEventsTest, SceneLoadedDisablesGtComparisonAndEmitsEvent) {
-        std::vector<bool> gt_mode_events;
-        lfs::core::events::ui::GTComparisonModeChanged::when(
-            [&gt_mode_events](const auto& event) { gt_mode_events.push_back(event.enabled); });
-
+    TEST_F(RenderingManagerEventsTest, SceneLoadedDisablesGtComparison) {
         RenderingManager manager;
         lfs::core::events::cmd::ToggleGTComparison{}.emit();
         EXPECT_EQ(manager.getSettings().split_view_mode, SplitViewMode::GTComparison);
@@ -247,16 +248,9 @@ namespace lfs::vis {
             .emit();
 
         EXPECT_EQ(manager.getSettings().split_view_mode, SplitViewMode::Disabled);
-        ASSERT_EQ(gt_mode_events.size(), 2u);
-        EXPECT_TRUE(gt_mode_events[0]);
-        EXPECT_FALSE(gt_mode_events[1]);
     }
 
-    TEST_F(RenderingManagerEventsTest, SceneClearedDisablesGtComparisonAndEmitsEvent) {
-        std::vector<bool> gt_mode_events;
-        lfs::core::events::ui::GTComparisonModeChanged::when(
-            [&gt_mode_events](const auto& event) { gt_mode_events.push_back(event.enabled); });
-
+    TEST_F(RenderingManagerEventsTest, SceneClearedDisablesGtComparison) {
         RenderingManager manager;
         lfs::core::events::cmd::ToggleGTComparison{}.emit();
         EXPECT_EQ(manager.getSettings().split_view_mode, SplitViewMode::GTComparison);
@@ -264,9 +258,6 @@ namespace lfs::vis {
         lfs::core::events::state::SceneCleared{}.emit();
 
         EXPECT_EQ(manager.getSettings().split_view_mode, SplitViewMode::Disabled);
-        ASSERT_EQ(gt_mode_events.size(), 2u);
-        EXPECT_TRUE(gt_mode_events[0]);
-        EXPECT_FALSE(gt_mode_events[1]);
     }
 
 } // namespace lfs::vis

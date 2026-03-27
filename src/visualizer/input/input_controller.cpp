@@ -246,7 +246,6 @@ namespace lfs::vis {
         unsubscribe(cmd::ResetCamera{}, reset_camera_handler_id_);
         unsubscribe(state::DatasetLoadCompleted{}, dataset_load_completed_handler_id_);
         unsubscribe(internal::WindowFocusLost{}, window_focus_lost_handler_id_);
-        unsubscribe(ui::GTComparisonModeChanged{}, gt_comparison_mode_changed_handler_id_);
 
         if (instance_ == this) {
             instance_ = nullptr;
@@ -285,13 +284,6 @@ namespace lfs::vis {
 
         refreshMovementKeyCache();
         bindings_.setOnBindingsChanged([this]() { refreshMovementKeyCache(); });
-
-        if (gt_comparison_mode_changed_handler_id_ == 0) {
-            gt_comparison_mode_changed_handler_id_ =
-                ui::GTComparisonModeChanged::when([this](const auto& event) {
-                    gt_comparison_active_ = event.enabled;
-                });
-        }
     }
 
     void InputController::refreshMovementKeyCache() {
@@ -346,18 +338,20 @@ namespace lfs::vis {
     }
 
     bool InputController::isNearSplitter(double x) const {
-        if (!services().renderingOrNull() || services().renderingOrNull()->getSettings().split_view_mode == SplitViewMode::Disabled) {
+        const auto* const rendering = services().renderingOrNull();
+        if (!rendering) {
             return false;
         }
 
-        const auto viewport_size = glm::ivec2(static_cast<int>(viewport_bounds_.width),
-                                              static_cast<int>(viewport_bounds_.height));
-        const auto content = services().renderingOrNull()->getContentBounds(viewport_size);
-        const float split_pos = services().renderingOrNull()->getSettings().split_position;
-        const float split_x = viewport_bounds_.x + content.x + content.width * split_pos;
+        const auto split_x = rendering->getSplitDividerScreenX(
+            {viewport_bounds_.x, viewport_bounds_.y},
+            {viewport_bounds_.width, viewport_bounds_.height});
+        if (!split_x) {
+            return false;
+        }
 
         constexpr float SPLITTER_HIT_HALF_WIDTH = 12.0f;
-        return std::abs(x - split_x) < SPLITTER_HIT_HALF_WIDTH;
+        return std::abs(x - *split_x) < SPLITTER_HIT_HALF_WIDTH;
     }
 
     // Core handlers
@@ -429,7 +423,7 @@ namespace lfs::vis {
             // Check for splitter drag
             if (isNearSplitter(x) && services().renderingOrNull()) {
                 drag_mode_ = DragMode::Splitter;
-                splitter_start_pos_ = services().renderingOrNull()->getSettings().split_position;
+                splitter_start_pos_ = services().renderingOrNull()->getSplitPosition();
                 splitter_start_x_ = x;
                 SDL_SetCursor(resize_cursor_);
                 LOG_TRACE("Started splitter drag");
@@ -531,28 +525,26 @@ namespace lfs::vis {
 
                 glm::vec3 camera_offset(0.0f);
 
-                // In split view mode, offset camera so pivot appears at panel center
-                if (services().renderingOrNull()) {
-                    const auto& settings = services().renderingOrNull()->getSettings();
-                    if (settings.split_view_mode != SplitViewMode::Disabled &&
-                        settings.split_view_mode != SplitViewMode::IndependentDual) {
-                        const float split_pos = settings.split_position;
+                // In comparison split modes, offset camera so the pivot lands in the active panel center.
+                if (auto* const rendering = services().renderingOrNull();
+                    rendering && rendering->isSplitViewActive() && !rendering->isIndependentSplitViewActive()) {
+                    if (const auto divider_x = rendering->getSplitDividerScreenX(
+                            {viewport_bounds_.x, viewport_bounds_.y},
+                            {viewport_bounds_.width, viewport_bounds_.height})) {
                         const float local_x = static_cast<float>(x) - viewport_bounds_.x;
                         const float viewport_width = viewport_bounds_.width;
                         const float viewport_height = viewport_bounds_.height;
                         if (viewport_width <= 0.0f || viewport_height <= 0.0f) {
                             break;
                         }
-                        const float normalized_x = local_x / viewport_width;
+                        const float split_x = *divider_x - viewport_bounds_.x;
 
                         // Determine which panel was clicked and its center
                         float panel_center_x;
-                        if (normalized_x < split_pos) {
-                            // Left panel: center is at split_pos / 2
-                            panel_center_x = split_pos * viewport_width / 2.0f;
+                        if (local_x < split_x) {
+                            panel_center_x = split_x * 0.5f;
                         } else {
-                            // Right panel: center is at (split_pos + 1) / 2
-                            panel_center_x = (split_pos + 1.0f) * viewport_width / 2.0f;
+                            panel_center_x = split_x + (viewport_width - split_x) * 0.5f;
                         }
 
                         // Offset from viewport center to panel center (in pixels)
@@ -717,14 +709,18 @@ namespace lfs::vis {
 
                             float panel_offset_x = 0.0f;
                             float panel_width = viewport_bounds_.width;
-                            if (isIndependentSplitViewActive() && services().renderingOrNull()) {
-                                const float split_x =
-                                    viewport_bounds_.width * services().renderingOrNull()->getSettings().split_position;
-                                if (node_rect_panel_ == SplitViewPanelId::Right) {
-                                    panel_offset_x = split_x;
-                                    panel_width = viewport_bounds_.width - split_x;
-                                } else {
-                                    panel_width = split_x;
+                            if (isIndependentSplitViewActive()) {
+                                if (auto* const rendering = services().renderingOrNull()) {
+                                    const auto panel_info = rendering->resolveViewerPanel(
+                                        viewport_,
+                                        {viewport_bounds_.x, viewport_bounds_.y},
+                                        {viewport_bounds_.width, viewport_bounds_.height},
+                                        std::nullopt,
+                                        node_rect_panel_);
+                                    if (panel_info && panel_info->valid()) {
+                                        panel_offset_x = panel_info->x - vp_offset.x;
+                                        panel_width = panel_info->width;
+                                    }
                                 }
                             }
 
@@ -736,9 +732,8 @@ namespace lfs::vis {
                                 std::max(node_rect_start_.y, node_rect_end_.y) - vp_offset.y);
 
                             Viewport pick_viewport = viewport_;
-                            if (node_rect_panel_ == SplitViewPanelId::Right && isIndependentSplitViewActive() &&
-                                services().renderingOrNull()) {
-                                pick_viewport = services().renderingOrNull()->getIndependentSplitViewport();
+                            if (auto* const rendering = services().renderingOrNull()) {
+                                pick_viewport = rendering->resolvePanelViewport(viewport_, node_rect_panel_);
                             }
                             pick_viewport.windowSize = glm::ivec2(
                                 std::max(static_cast<int>(panel_width), 1),
@@ -872,7 +867,8 @@ namespace lfs::vis {
 
         // Determine if we should show resize cursor for splitter
         bool should_show_resize = false;
-        if (services().renderingOrNull() && services().renderingOrNull()->getSettings().split_view_mode != SplitViewMode::Disabled) {
+        if (const auto* const rendering = services().renderingOrNull();
+            rendering && rendering->isSplitViewActive()) {
             should_show_resize = (drag_mode_ == DragMode::None &&
                                   isInViewport(x, y) &&
                                   isNearSplitter(x) &&
@@ -1493,7 +1489,10 @@ namespace lfs::vis {
 
         // Load splat and mesh files supported by the generic loader path.
         for (const auto& splat : splat_files) {
-            cmd::LoadFile{.path = splat, .is_dataset = false}.emit();
+            auto event = cmd::LoadFile{};
+            event.path = splat;
+            event.is_dataset = false;
+            event.emit();
             LOG_INFO("Loading {} via drag-and-drop: {}",
                      lfs::core::path_to_utf8(splat.extension()), lfs::core::path_to_utf8(splat.filename()));
         }
@@ -1611,10 +1610,11 @@ namespace lfs::vis {
             cam_data->camera_model_type() == lfs::core::CameraModelType::EQUIRECTANGULAR;
 
         const auto focal_mm = lfs::rendering::vFovToFocalLength(fov_y_deg);
-        ui::RenderSettingsChanged{
-            .focal_length_mm = is_equirectangular ? std::nullopt : std::optional(focal_mm),
-            .equirectangular = is_equirectangular}
-            .emit();
+        auto render_settings_event = ui::RenderSettingsChanged{};
+        render_settings_event.focal_length_mm =
+            is_equirectangular ? std::nullopt : std::optional(focal_mm);
+        render_settings_event.equirectangular = is_equirectangular;
+        render_settings_event.emit();
 
         // In orthographic mode, recalculate ortho_scale to match the equivalent perspective view
         if (auto* rm = services().renderingOrNull()) {
@@ -1775,13 +1775,17 @@ namespace lfs::vis {
     }
 
     SplitViewPanelId InputController::splitPanelForScreenX(const double x) const {
-        if (!isIndependentSplitViewActive() || viewport_bounds_.width <= 0.0f || !services().renderingOrNull()) {
+        const auto* const rendering = services().renderingOrNull();
+        if (!rendering || viewport_bounds_.width <= 0.0f || viewport_bounds_.height <= 0.0f) {
             return SplitViewPanelId::Left;
         }
 
-        const float local_x = static_cast<float>(x) - viewport_bounds_.x;
-        const float divider_x = viewport_bounds_.width * services().renderingOrNull()->getSettings().split_position;
-        return local_x >= divider_x ? SplitViewPanelId::Right : SplitViewPanelId::Left;
+        const auto panel = rendering->resolveViewerPanel(
+            viewport_,
+            {viewport_bounds_.x, viewport_bounds_.y},
+            {viewport_bounds_.width, viewport_bounds_.height},
+            glm::vec2(static_cast<float>(x), viewport_bounds_.y + viewport_bounds_.height * 0.5f));
+        return panel ? panel->panel : SplitViewPanelId::Left;
     }
 
     std::optional<InputController::PanelInteractionState> InputController::resolvePanelInteraction(
@@ -1790,28 +1794,33 @@ namespace lfs::vis {
             return std::nullopt;
         }
 
+        const auto* const rendering = services().renderingOrNull();
         PanelInteractionState state;
-        state.panel = splitPanelForScreenX(x);
         state.viewport = &viewport_;
-        state.local_x = static_cast<float>(x) - viewport_bounds_.x;
-        state.local_y = static_cast<float>(y) - viewport_bounds_.y;
-        state.width = viewport_bounds_.width;
-        state.height = viewport_bounds_.height;
-
-        if (!isIndependentSplitViewActive() || !services().renderingOrNull()) {
-            return state;
+        if (!rendering) {
+            state.panel = SplitViewPanelId::Left;
+            state.local_x = static_cast<float>(x) - viewport_bounds_.x;
+            state.local_y = static_cast<float>(y) - viewport_bounds_.y;
+            state.width = viewport_bounds_.width;
+            state.height = viewport_bounds_.height;
+            return state.valid() ? std::optional<PanelInteractionState>(state) : std::nullopt;
         }
 
-        const float divider_x = viewport_bounds_.width * services().renderingOrNull()->getSettings().split_position;
-        if (state.panel == SplitViewPanelId::Right) {
-            if (const auto* secondary = services().renderingOrNull()->getIndependentSplitViewportOrNull()) {
-                state.viewport = const_cast<Viewport*>(secondary);
-            }
-            state.local_x -= divider_x;
-            state.width = viewport_bounds_.width - divider_x;
-        } else {
-            state.width = divider_x;
+        const auto panel = rendering->resolveViewerPanel(
+            viewport_,
+            {viewport_bounds_.x, viewport_bounds_.y},
+            {viewport_bounds_.width, viewport_bounds_.height},
+            glm::vec2(static_cast<float>(x), static_cast<float>(y)));
+        if (!panel) {
+            return std::nullopt;
         }
+
+        state.panel = panel->panel;
+        state.viewport = const_cast<Viewport*>(panel->viewport);
+        state.local_x = static_cast<float>(x) - panel->x;
+        state.local_y = static_cast<float>(y) - panel->y;
+        state.width = panel->width;
+        state.height = panel->height;
 
         return state.valid() ? std::optional<PanelInteractionState>(state) : std::nullopt;
     }
@@ -1824,19 +1833,15 @@ namespace lfs::vis {
     }
 
     Viewport& InputController::activeKeyboardViewport() {
-        if (focused_split_panel_ == SplitViewPanelId::Right &&
-            isIndependentSplitViewActive() &&
-            services().renderingOrNull()) {
-            return services().renderingOrNull()->getIndependentSplitViewport();
+        if (auto* const rendering = services().renderingOrNull()) {
+            return rendering->resolveFocusedViewport(viewport_);
         }
         return viewport_;
     }
 
     const Viewport& InputController::activeKeyboardViewport() const {
-        if (focused_split_panel_ == SplitViewPanelId::Right &&
-            isIndependentSplitViewActive() &&
-            services().renderingOrNull()) {
-            return services().renderingOrNull()->getIndependentSplitViewport();
+        if (auto* const rendering = services().renderingOrNull()) {
+            return rendering->resolveFocusedViewport(viewport_);
         }
         return viewport_;
     }
@@ -1886,8 +1891,10 @@ namespace lfs::vis {
             camera_is_moving_ = true;
             last_camera_movement_time_ = now;
 
-            if (gt_comparison_active_)
+            if (auto* const rendering = services().renderingOrNull();
+                rendering && rendering->isGTComparisonActive()) {
                 cmd::ToggleGTComparison{}.emit();
+            }
 
             if (auto* trainer = services().trainerOrNull(); trainer && trainer->isRunning()) {
                 trainer->pauseTrainingTemporary();

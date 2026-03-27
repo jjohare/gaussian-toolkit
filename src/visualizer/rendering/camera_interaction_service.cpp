@@ -5,7 +5,6 @@
 #include "camera_interaction_service.hpp"
 #include "rendering/rendering.hpp"
 #include "scene/scene_manager.hpp"
-#include <algorithm>
 
 namespace lfs::vis {
 
@@ -37,25 +36,9 @@ namespace lfs::vis {
             return -1;
         }
 
-        const lfs::rendering::ViewportData* viewport_data = &viewport_context.viewport_data;
-        glm::vec2 viewport_pos(viewport_context.viewport_region.x, viewport_context.viewport_region.y);
-        glm::vec2 viewport_size(viewport_context.viewport_region.width, viewport_context.viewport_region.height);
-        if (viewport_context.independent_split_active &&
-            viewport_context.secondary_viewport_valid &&
-            viewport_context.viewport_region.width > 1.0f) {
-            const auto layouts = makeSplitViewPanelLayouts(
-                std::max(static_cast<int>(viewport_context.viewport_region.width), 1),
-                viewport_context.split_position);
-            const float local_x = mouse_pos.x - viewport_context.viewport_region.x;
-            const SplitViewPanelId panel = local_x >= static_cast<float>(layouts[0].width)
-                                               ? SplitViewPanelId::Right
-                                               : SplitViewPanelId::Left;
-            const size_t panel_index = splitViewPanelIndex(panel);
-            viewport_pos.x += static_cast<float>(layouts[panel_index].x);
-            viewport_size.x = static_cast<float>(layouts[panel_index].width);
-            viewport_data = (panel == SplitViewPanelId::Right)
-                                ? &viewport_context.secondary_viewport_data
-                                : &viewport_context.viewport_data;
+        const auto* panel = viewport_context.resolvePanel(mouse_pos);
+        if (!panel) {
+            return hovered_camera_id_;
         }
 
         glm::mat4 scene_transform(1.0f);
@@ -66,9 +49,9 @@ namespace lfs::vis {
 
         const lfs::rendering::CameraFrustumPickRequest request{
             .mouse_pos = mouse_pos,
-            .viewport_pos = viewport_pos,
-            .viewport_size = viewport_size,
-            .viewport = *viewport_data,
+            .viewport_pos = panel->viewport_pos,
+            .viewport_size = panel->viewport_size,
+            .viewport = panel->viewport_data,
             .scale = settings.camera_frustum_scale,
             .scene_transform = scene_transform};
 

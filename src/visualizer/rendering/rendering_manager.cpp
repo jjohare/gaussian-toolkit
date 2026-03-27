@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later */
 
 #include "rendering_manager.hpp"
+#include "core/events.hpp"
 #include "core/logger.hpp"
 #include "rendering/rasterizer/rasterization/include/rasterization_api_tensor.h"
 #include "rendering/rasterizer/rasterization/include/rasterization_config.h"
@@ -148,17 +149,81 @@ namespace lfs::vis {
         return split_view_service_.getInfo();
     }
 
-    bool RenderingManager::isIndependentSplitViewActive() const {
+    bool RenderingManager::isSplitViewActive() const {
         std::lock_guard<std::mutex> lock(settings_mutex_);
-        return settings_.split_view_mode == SplitViewMode::IndependentDual;
+        return split_view_service_.isActive(settings_);
     }
 
-    const Viewport* RenderingManager::getIndependentSplitViewportOrNull() const {
+    bool RenderingManager::isGTComparisonActive() const {
         std::lock_guard<std::mutex> lock(settings_mutex_);
-        if (settings_.split_view_mode != SplitViewMode::IndependentDual) {
-            return nullptr;
+        return split_view_service_.isGTComparisonActive(settings_);
+    }
+
+    bool RenderingManager::isIndependentSplitViewActive() const {
+        std::lock_guard<std::mutex> lock(settings_mutex_);
+        return split_view_service_.isIndependentDualActive(settings_);
+    }
+
+    float RenderingManager::getSplitPosition() const {
+        std::lock_guard<std::mutex> lock(settings_mutex_);
+        return settings_.split_position;
+    }
+
+    std::optional<float> RenderingManager::getSplitDividerScreenX(const glm::vec2& viewport_pos,
+                                                                  const glm::vec2& viewport_size) const {
+        std::lock_guard<std::mutex> lock(settings_mutex_);
+        if (!split_view_service_.isActive(settings_)) {
+            return std::nullopt;
         }
-        return &split_view_service_.secondaryViewport();
+
+        const auto content_bounds = getContentBounds(glm::ivec2(
+            std::max(static_cast<int>(viewport_size.x), 0),
+            std::max(static_cast<int>(viewport_size.y), 0)));
+        return viewport_pos.x + content_bounds.x + content_bounds.width * settings_.split_position;
+    }
+
+    Viewport& RenderingManager::resolvePanelViewport(Viewport& primary_viewport, const SplitViewPanelId panel) {
+        std::lock_guard<std::mutex> lock(settings_mutex_);
+        if (split_view_service_.isIndependentDualActive(settings_) &&
+            panel == SplitViewPanelId::Right) {
+            return split_view_service_.secondaryViewport();
+        }
+        return primary_viewport;
+    }
+
+    const Viewport& RenderingManager::resolvePanelViewport(
+        const Viewport& primary_viewport,
+        const SplitViewPanelId panel) const {
+        std::lock_guard<std::mutex> lock(settings_mutex_);
+        if (split_view_service_.isIndependentDualActive(settings_) &&
+            panel == SplitViewPanelId::Right) {
+            return split_view_service_.secondaryViewport();
+        }
+        return primary_viewport;
+    }
+
+    void RenderingManager::applySplitModeChange(const SplitViewService::ModeChangeResult& result) {
+        if (!result.mode_changed) {
+            return;
+        }
+
+        if (result.clear_viewport_output) {
+            viewport_artifact_service_.clearViewportOutput();
+        }
+
+        if (result.restore_equirectangular) {
+            auto event = lfs::core::events::ui::RenderSettingsChanged{};
+            event.equirectangular = *result.restore_equirectangular;
+            event.emit();
+        }
+    }
+
+    Viewport& RenderingManager::resolveFocusedViewport(Viewport& primary_viewport) {
+        return resolvePanelViewport(primary_viewport, split_view_service_.focusedPanel());
+    }
+
+    const Viewport& RenderingManager::resolveFocusedViewport(const Viewport& primary_viewport) const {
+        return resolvePanelViewport(primary_viewport, split_view_service_.focusedPanel());
     }
 
     void RenderingManager::setCursorPreviewState(const bool active, const float x, const float y, const float radius,

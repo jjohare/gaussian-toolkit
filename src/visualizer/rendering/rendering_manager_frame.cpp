@@ -143,9 +143,6 @@ namespace lfs::vis {
              .render_count = render_count_}};
         const auto frame_result = frame_coordinator.execute(
             {.viewport = context.viewport,
-             .secondary_viewport = settings_.split_view_mode == SplitViewMode::IndependentDual
-                                       ? &split_view_service_.secondaryViewport()
-                                       : nullptr,
              .viewport_region = context.viewport_region,
              .scene_manager = scene_manager,
              .model = model,

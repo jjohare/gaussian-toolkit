@@ -31,12 +31,8 @@ namespace lfs::vis::tools {
 
         [[nodiscard]] const Viewport& selectionFilterViewport(const ToolContext& ctx) {
             auto* const rm = ctx.getRenderingManager();
-            if (rm &&
-                rm->isIndependentSplitViewActive() &&
-                rm->getFocusedSplitPanel() == SplitViewPanelId::Right) {
-                if (const auto* const secondary = rm->getIndependentSplitViewportOrNull()) {
-                    return *secondary;
-                }
+            if (rm) {
+                return rm->resolveFocusedViewport(ctx.getViewport());
             }
             return ctx.getViewport();
         }

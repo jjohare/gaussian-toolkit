@@ -509,6 +509,7 @@ namespace lfs::vis {
         const auto viewport_pos = gm->getViewportPos();
         const auto viewport_size = gm->getViewportSize();
         const auto panel = rendering_manager_->resolveViewerPanel(
+            gm->getViewer()->getViewport(),
             {viewport_pos.x, viewport_pos.y},
             {viewport_size.x, viewport_size.y},
             screen_point,
@@ -526,10 +527,7 @@ namespace lfs::vis {
             .render_width = panel->render_width,
             .render_height = panel->render_height,
         };
-        context.viewport = &gm->getViewer()->getViewport();
-        if (panel->panel == SplitViewPanelId::Right && rendering_manager_->isIndependentSplitViewActive()) {
-            context.viewport = rendering_manager_->getIndependentSplitViewportOrNull();
-        }
+        context.viewport = panel->viewport;
         return context.info.valid() ? std::optional<ViewerViewportContext>(context) : std::nullopt;
     }
 

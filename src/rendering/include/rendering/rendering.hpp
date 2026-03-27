@@ -185,9 +185,19 @@ namespace lfs::rendering {
         PointCloudFilterState filters;
     };
 
-    struct FrameMetadata {
+    struct FramePanelMetadata {
         std::shared_ptr<lfs::core::Tensor> depth;
-        std::shared_ptr<lfs::core::Tensor> depth_right; // For split view: depth from right panel
+        float start_position = 0.0f;
+        float end_position = 1.0f;
+
+        [[nodiscard]] bool valid() const {
+            return end_position > start_position;
+        }
+    };
+
+    struct FrameMetadata {
+        std::array<FramePanelMetadata, 2> depth_panels{};
+        size_t depth_panel_count = 0;
         bool valid = false;
         // Depth conversion parameters (needed for proper depth buffer writing)
         bool depth_is_ndc = false;               // True if depth is already NDC (0-1), e.g., from OpenGL
@@ -195,7 +205,10 @@ namespace lfs::rendering {
         float near_plane = DEFAULT_NEAR_PLANE;
         float far_plane = DEFAULT_FAR_PLANE;
         bool orthographic = false;
-        float split_position = -1.0f; // For split view: normalized split position (-1 = not split view)
+
+        [[nodiscard]] const std::shared_ptr<lfs::core::Tensor>& primaryDepth() const {
+            return depth_panels[0].depth;
+        }
     };
 
     struct GaussianGpuFrameResult {

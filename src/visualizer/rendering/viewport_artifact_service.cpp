@@ -6,6 +6,7 @@
 #include "core/cuda_debug.hpp"
 #include "rendering/rendering.hpp"
 #include <cuda_runtime.h>
+#include <cmath>
 #include <glad/glad.h>
 #include <limits>
 
@@ -54,11 +55,12 @@ namespace lfs::vis {
     }
 
     bool ViewportArtifactService::hasOutputArtifacts() const {
-        return (metadata_.depth && metadata_.depth->is_valid()) ||
-               (metadata_.depth_right && metadata_.depth_right->is_valid()) ||
-               hasGpuFrame() ||
-               rendered_size_.x > 0 ||
-               rendered_size_.y > 0;
+        for (size_t i = 0; i < metadata_.depth_panel_count && i < metadata_.depth_panels.size(); ++i) {
+            if (metadata_.depth_panels[i].depth && metadata_.depth_panels[i].depth->is_valid()) {
+                return true;
+            }
+        }
+        return hasGpuFrame() || rendered_size_.x > 0 || rendered_size_.y > 0;
     }
 
     std::shared_ptr<lfs::core::Tensor> ViewportArtifactService::getCapturedImageIfCurrent() const {
@@ -134,28 +136,45 @@ namespace lfs::vis {
             int panel_local_x = x;
             int panel_viewport_width = viewport_width;
 
-            if (metadata_.split_position > 0.0f &&
-                metadata_.depth && metadata_.depth->is_valid()) {
-                const auto layouts = makeSplitViewPanelLayouts(viewport_width, metadata_.split_position);
-                SplitViewPanelId target_panel = panel.value_or(SplitViewPanelId::Left);
-                if (!panel) {
-                    target_panel = x >= layouts[0].width ? SplitViewPanelId::Right : SplitViewPanelId::Left;
+            if (metadata_.depth_panel_count > 0) {
+                size_t panel_index = 0;
+                int panel_start_x = 0;
+                int panel_end_x = viewport_width;
+
+                if (panel && metadata_.depth_panel_count > 1) {
+                    panel_index = (*panel == SplitViewPanelId::Right) ? 1 : 0;
+                } else if (!panel && metadata_.depth_panel_count > 1) {
+                    for (size_t i = 0; i < metadata_.depth_panel_count && i < metadata_.depth_panels.size(); ++i) {
+                        const auto& depth_panel = metadata_.depth_panels[i];
+                        const int candidate_start =
+                            static_cast<int>(std::lround(static_cast<float>(viewport_width) * depth_panel.start_position));
+                        const int candidate_end =
+                            static_cast<int>(std::lround(static_cast<float>(viewport_width) * depth_panel.end_position));
+                        if (x >= candidate_start && (x < candidate_end || i + 1 == metadata_.depth_panel_count)) {
+                            panel_index = i;
+                            panel_start_x = candidate_start;
+                            panel_end_x = candidate_end;
+                            break;
+                        }
+                    }
                 }
 
-                const size_t panel_index = splitViewPanelIndex(target_panel);
-                if (!panel) {
-                    panel_local_x -= layouts[panel_index].x;
+                if (panel_index < metadata_.depth_panel_count && panel_index < metadata_.depth_panels.size()) {
+                    const auto& depth_panel = metadata_.depth_panels[panel_index];
+                    if (!panel || metadata_.depth_panel_count == 1) {
+                        panel_start_x =
+                            static_cast<int>(std::lround(static_cast<float>(viewport_width) * depth_panel.start_position));
+                        panel_end_x =
+                            static_cast<int>(std::lround(static_cast<float>(viewport_width) * depth_panel.end_position));
+                    }
+                    panel_viewport_width = std::max(panel_end_x - panel_start_x, 1);
+                    if (!panel) {
+                        panel_local_x -= panel_start_x;
+                    }
+                    if (depth_panel.depth && depth_panel.depth->is_valid()) {
+                        depth_ptr = depth_panel.depth.get();
+                    }
                 }
-                panel_viewport_width = std::max(layouts[panel_index].width, 1);
-
-                if (target_panel == SplitViewPanelId::Right &&
-                    metadata_.depth_right && metadata_.depth_right->is_valid()) {
-                    depth_ptr = metadata_.depth_right.get();
-                } else {
-                    depth_ptr = metadata_.depth.get();
-                }
-            } else if (metadata_.depth && metadata_.depth->is_valid()) {
-                depth_ptr = metadata_.depth.get();
             }
 
             if (depth_ptr && depth_ptr->ndim() == 3) {

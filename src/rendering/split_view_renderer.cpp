@@ -18,10 +18,23 @@ namespace lfs::rendering {
             std::optional<FrameMetadata>& right_render_metadata,
             const float split_position) {
             FrameMetadata result{
-                .depth = left_render_metadata ? std::move(left_render_metadata->depth) : nullptr,
-                .depth_right = right_render_metadata ? std::move(right_render_metadata->depth) : nullptr,
-                .valid = true,
-                .split_position = split_position};
+                .depth_panels =
+                    {FramePanelMetadata{
+                         .depth = left_render_metadata && left_render_metadata->depth_panel_count > 0
+                                      ? std::move(left_render_metadata->depth_panels[0].depth)
+                                      : nullptr,
+                         .start_position = 0.0f,
+                         .end_position = split_position,
+                     },
+                     FramePanelMetadata{
+                         .depth = right_render_metadata && right_render_metadata->depth_panel_count > 0
+                                      ? std::move(right_render_metadata->depth_panels[0].depth)
+                                      : nullptr,
+                         .start_position = split_position,
+                         .end_position = 1.0f,
+                     }},
+                .depth_panel_count = 2,
+                .valid = true};
 
             if (left_render_metadata) {
                 result.depth_is_ndc = left_render_metadata->depth_is_ndc;
@@ -45,7 +58,7 @@ namespace lfs::rendering {
             const FrameMetadata& metadata) {
             return RenderingPipeline::ImageRenderResult{
                 .image = image ? *image : Tensor(),
-                .depth = metadata.depth ? *metadata.depth : Tensor(),
+                .depth = metadata.primaryDepth() ? *metadata.primaryDepth() : Tensor(),
                 .valid = image && image->is_valid(),
                 .depth_is_ndc = metadata.depth_is_ndc,
                 .external_depth_texture = metadata.external_depth_texture,

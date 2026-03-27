@@ -628,7 +628,12 @@ namespace lfs::rendering {
 
     FrameMetadata RenderingEngineImpl::makeFrameMetadata(const RenderingPipeline::ImageRenderResult& result) {
         return FrameMetadata{
-            .depth = result.depth.is_valid() ? std::make_shared<Tensor>(result.depth) : nullptr,
+            .depth_panels = {FramePanelMetadata{
+                .depth = result.depth.is_valid() ? std::make_shared<Tensor>(result.depth) : nullptr,
+                .start_position = 0.0f,
+                .end_position = 1.0f,
+            }},
+            .depth_panel_count = 1,
             .valid = result.valid,
             .depth_is_ndc = result.depth_is_ndc,
             .external_depth_texture = result.external_depth_texture,
@@ -984,7 +989,7 @@ namespace lfs::rendering {
         const GLuint uploaded_depth_texture =
             metadata.external_depth_texture != 0
                 ? metadata.external_depth_texture
-                : (metadata.depth ? screen_renderer_->getUploadedDepthTexture() : 0);
+                : (metadata.primaryDepth() ? screen_renderer_->getUploadedDepthTexture() : 0);
 
         return GpuFrame{
             .color = {.id = screen_renderer_->getUploadedColorTexture(),
@@ -1144,8 +1149,9 @@ namespace lfs::rendering {
         // a new shared_ptr per render, so distinct renders always have distinct pointers.
         // Same pointer == same content.
         const bool same_image_ptr = (last_presented_image_.get() == image.get());
-        const bool same_depth_ptr = (!metadata.depth && !last_presented_depth_) ||
-                                    (metadata.depth && last_presented_depth_.get() == metadata.depth.get());
+        const auto& primary_depth = metadata.primaryDepth();
+        const bool same_depth_ptr = (!primary_depth && !last_presented_depth_) ||
+                                    (primary_depth && last_presented_depth_.get() == primary_depth.get());
         const bool same_depth_tex = (last_presented_external_depth_texture_ == metadata.external_depth_texture);
         const bool same_depth_mode = (last_presented_depth_is_ndc_ == metadata.depth_is_ndc);
         const bool same_near = (last_presented_near_plane_ == metadata.near_plane);
@@ -1168,7 +1174,7 @@ namespace lfs::rendering {
 
         RenderingPipeline::ImageRenderResult internal_result;
         internal_result.image = *image;
-        internal_result.depth = metadata.depth ? *metadata.depth : Tensor();
+        internal_result.depth = primary_depth ? *primary_depth : Tensor();
         internal_result.valid = true;
         internal_result.depth_is_ndc = metadata.depth_is_ndc;
         internal_result.external_depth_texture = metadata.external_depth_texture;
@@ -1183,7 +1189,7 @@ namespace lfs::rendering {
         }
 
         last_presented_image_ = image;
-        last_presented_depth_ = metadata.depth;
+        last_presented_depth_ = primary_depth;
         last_presented_external_depth_texture_ = metadata.external_depth_texture;
         last_presented_depth_is_ndc_ = metadata.depth_is_ndc;
         last_presented_near_plane_ = metadata.near_plane;

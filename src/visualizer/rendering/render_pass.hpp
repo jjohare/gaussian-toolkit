@@ -13,6 +13,7 @@
 #include <rendering/frame_contract.hpp>
 #include <rendering/rendering.hpp>
 #include <shared_mutex>
+#include <vector>
 
 namespace lfs::core {
     class Tensor;
@@ -45,9 +46,21 @@ namespace lfs::vis {
         glm::mat4 ellipsoid_transform{1};
     };
 
+    struct FrameViewPanel {
+        SplitViewPanelId panel = SplitViewPanelId::Left;
+        const Viewport* viewport = nullptr;
+        glm::ivec2 render_size{0};
+        glm::ivec2 viewport_offset{0};
+        float start_position = 0.0f;
+        float end_position = 1.0f;
+
+        [[nodiscard]] bool valid() const {
+            return viewport != nullptr && render_size.x > 0 && render_size.y > 0;
+        }
+    };
+
     struct FrameContext {
         const Viewport& viewport;
-        const Viewport* secondary_viewport = nullptr;
         const ViewportRegion* viewport_region = nullptr;
         bool render_lock_held = false;
 
@@ -66,6 +79,16 @@ namespace lfs::vis {
         int current_camera_id = -1;
         int hovered_gaussian_id = -1;
         float selection_flash_intensity = 0;
+        std::vector<FrameViewPanel> view_panels;
+
+        [[nodiscard]] const FrameViewPanel* findViewPanel(const SplitViewPanelId panel_id) const {
+            for (const auto& panel : view_panels) {
+                if (panel.panel == panel_id && panel.valid()) {
+                    return &panel;
+                }
+            }
+            return nullptr;
+        }
 
         [[nodiscard]] lfs::rendering::FrameView makeFrameView(const Viewport& source,
                                                               const glm::ivec2 size) const {
@@ -85,6 +108,10 @@ namespace lfs::vis {
             return makeFrameView(viewport, render_size);
         }
 
+        [[nodiscard]] lfs::rendering::FrameView makeFrameView(const FrameViewPanel& panel) const {
+            return makeFrameView(*panel.viewport, panel.render_size);
+        }
+
         [[nodiscard]] lfs::rendering::ViewportData makeViewportData(const Viewport& source,
                                                                     const glm::ivec2 size) const {
             const auto frame_view = makeFrameView(source, size);
@@ -99,29 +126,53 @@ namespace lfs::vis {
         [[nodiscard]] lfs::rendering::ViewportData makeViewportData() const {
             return makeViewportData(viewport, render_size);
         }
+
+        [[nodiscard]] lfs::rendering::ViewportData makeViewportData(const FrameViewPanel& panel) const {
+            return makeViewportData(*panel.viewport, panel.render_size);
+        }
+    };
+
+    struct CachedRenderPanelMetadata {
+        std::shared_ptr<lfs::core::Tensor> depth;
+        float start_position = 0.0f;
+        float end_position = 1.0f;
+
+        [[nodiscard]] bool valid() const {
+            return end_position > start_position;
+        }
     };
 
     struct CachedRenderMetadata {
-        std::shared_ptr<lfs::core::Tensor> depth;
-        std::shared_ptr<lfs::core::Tensor> depth_right;
+        std::array<CachedRenderPanelMetadata, 2> depth_panels{};
+        size_t depth_panel_count = 0;
         bool valid = false;
         bool depth_is_ndc = false;
         float near_plane = lfs::rendering::DEFAULT_NEAR_PLANE;
         float far_plane = lfs::rendering::DEFAULT_FAR_PLANE;
         bool orthographic = false;
-        float split_position = -1.0f;
+
+        [[nodiscard]] const std::shared_ptr<lfs::core::Tensor>& primaryDepth() const {
+            return depth_panels[0].depth;
+        }
     };
 
     [[nodiscard]] inline CachedRenderMetadata makeCachedRenderMetadata(const lfs::rendering::FrameMetadata& result) {
-        return {
-            .depth = result.depth,
-            .depth_right = result.depth_right,
+        CachedRenderMetadata metadata{
+            .depth_panel_count = result.depth_panel_count,
             .valid = result.valid,
             .depth_is_ndc = result.depth_is_ndc,
             .near_plane = result.near_plane,
             .far_plane = result.far_plane,
             .orthographic = result.orthographic,
-            .split_position = result.split_position};
+        };
+        for (size_t i = 0; i < result.depth_panel_count && i < metadata.depth_panels.size(); ++i) {
+            metadata.depth_panels[i] = {
+                .depth = result.depth_panels[i].depth,
+                .start_position = result.depth_panels[i].start_position,
+                .end_position = result.depth_panels[i].end_position,
+            };
+        }
+        return metadata;
     }
 
     // Pass execution order (defined in RenderingManager constructor):

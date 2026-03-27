@@ -3,52 +3,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later */
 
 #include "split_view_pass.hpp"
-#include "../viewport_request_builder.hpp"
+#include "../split_view_composition.hpp"
 #include "core/logger.hpp"
-#include "scene/scene_manager.hpp"
-#include <cassert>
 
 namespace lfs::vis {
 
-    namespace {
-        constexpr glm::vec4 kSplitDividerColor(0.29f, 0.33f, 0.42f, 1.0f);
-
-        [[nodiscard]] lfs::rendering::SplitViewPanelContent buildModelPanelContent(
-            const FrameContext& ctx,
-            const Viewport& viewport,
-            const glm::ivec2 render_size,
-            const lfs::core::SplatData& model,
-            const glm::mat4& model_transform,
-            const bool use_full_scene,
-            const std::optional<SplitViewPanelId> render_panel = std::nullopt) {
-            lfs::rendering::SplitViewPanelContent content{
-                .type = lfs::rendering::PanelContentType::Model3D,
-                .model = &model,
-                .model_transform = model_transform,
-                .gaussian_render = std::nullopt,
-                .point_cloud_render = std::nullopt,
-                .texture_id = 0};
-
-            if (ctx.settings.point_cloud_mode) {
-                content.point_cloud_render =
-                    buildSplitViewPointCloudPanelRenderState(ctx, render_size, &viewport);
-                if (!use_full_scene) {
-                    content.point_cloud_render->scene = {};
-                }
-                return content;
-            }
-
-            content.gaussian_render =
-                buildSplitViewGaussianPanelRenderState(ctx, render_size, &viewport, render_panel);
-            if (!use_full_scene) {
-                content.gaussian_render->scene = {};
-            }
-            return content;
-        }
-    } // namespace
-
     bool SplitViewPass::shouldExecute(DirtyMask frame_dirty, const FrameContext& ctx) const {
-        if (ctx.settings.split_view_mode == SplitViewMode::Disabled)
+        if (!splitViewEnabled(ctx.settings.split_view_mode))
             return false;
         return (frame_dirty & sensitivity()) != 0;
     }
@@ -56,19 +17,17 @@ namespace lfs::vis {
     void SplitViewPass::execute(lfs::rendering::RenderingEngine& engine,
                                 const FrameContext& ctx,
                                 FrameResources& res) {
-        SplitViewInfo split_info{};
-        auto split_request = buildSplitViewRequest(ctx, res, split_info);
-        if (!split_request) {
+        auto composition = buildSplitViewCompositionPlan(ctx, res);
+        if (!composition) {
             res.split_view_executed = false;
             return;
         }
 
-        res.split_info = std::move(split_info);
-        res.split_info.enabled = true;
+        res.split_info = composition->toInfo();
 
         auto render_lock = acquireRenderLock(ctx);
 
-        auto result = engine.renderSplitViewGpuFrame(*split_request);
+        auto result = engine.renderSplitViewGpuFrame(composition->toRequest());
         render_lock.reset();
 
         if (result) {
@@ -82,183 +41,6 @@ namespace lfs::vis {
             res.cached_gpu_frame.reset();
             res.cached_result_size = {0, 0};
         }
-    }
-
-    std::optional<lfs::rendering::SplitViewRequest>
-    SplitViewPass::buildSplitViewRequest(const FrameContext& ctx, const FrameResources& res, SplitViewInfo& split_info) {
-        const auto& settings = ctx.settings;
-        if (settings.split_view_mode == SplitViewMode::Disabled || !ctx.scene_manager)
-            return std::nullopt;
-
-        const auto viewport_data = ctx.makeViewportData();
-
-        if (settings.split_view_mode == SplitViewMode::GTComparison) {
-            if (!res.gt_context || !res.gt_context->valid() ||
-                !res.cached_gpu_frame || !res.cached_gpu_frame->valid())
-                return std::nullopt;
-
-            const unsigned int rendered_texture = res.cached_gpu_frame->color.id;
-            // GT compare consumes the pre-rendered GpuFrame directly. Match the old cached-render
-            // contract by sampling only the GT-sized content region, but keep the cached-render
-            // orientation unchanged so the split-view compositor does not apply an extra Y flip.
-            const glm::vec2 rendered_texcoord_scale = res.gt_context->render_texcoord_scale;
-
-            auto letterbox_viewport = viewport_data;
-            letterbox_viewport.size = ctx.render_size;
-
-            const auto disabled_uids = ctx.scene_manager->getScene().getTrainingDisabledCameraUids();
-            const bool cam_disabled = ctx.current_camera_id >= 0 && disabled_uids.count(ctx.current_camera_id) > 0;
-            std::string gt_label = cam_disabled ? "Ground Truth (Excluded from Training)" : "Ground Truth";
-            split_info.left_name = gt_label;
-            split_info.right_name = "Rendered";
-
-            return lfs::rendering::SplitViewRequest{
-                .panels =
-                    std::array<lfs::rendering::SplitViewPanel, 2>{
-                        lfs::rendering::SplitViewPanel{
-                            .content =
-                                {.type = lfs::rendering::PanelContentType::Image2D,
-                                 .model = nullptr,
-                                 .model_transform = glm::mat4(1.0f),
-                                 .gaussian_render = std::nullopt,
-                                 .point_cloud_render = std::nullopt,
-                                 .texture_id = res.gt_context->gt_texture_id},
-                            .presentation =
-                                {.start_position = 0.0f,
-                                 .end_position = settings.split_position,
-                                 .texcoord_scale = res.gt_context->gt_texcoord_scale,
-                                 .flip_y = res.gt_context->gt_needs_flip}},
-                        lfs::rendering::SplitViewPanel{
-                            .content =
-                                {.type = lfs::rendering::PanelContentType::CachedRender,
-                                 .model = nullptr,
-                                 .model_transform = glm::mat4(1.0f),
-                                 .gaussian_render = std::nullopt,
-                                 .point_cloud_render = std::nullopt,
-                                 .texture_id = rendered_texture},
-                            .presentation =
-                                {.start_position = settings.split_position,
-                                 .end_position = 1.0f,
-                                 .texcoord_scale = rendered_texcoord_scale,
-                                 .flip_y = std::nullopt}}},
-                .composite =
-                    {.output_size = letterbox_viewport.size,
-                     .background_color = settings.background_color},
-                .presentation =
-                    {.divider_color = kSplitDividerColor,
-                     .letterbox = true,
-                     .content_size = res.gt_context->dimensions}};
-        }
-
-        if (settings.split_view_mode == SplitViewMode::PLYComparison) {
-            const auto& scene = ctx.scene_manager->getScene();
-            const auto visible_nodes = scene.getVisibleNodes();
-            if (visible_nodes.size() < 2) {
-                LOG_TRACE("PLY comparison needs at least 2 visible nodes, have {}", visible_nodes.size());
-                return std::nullopt;
-            }
-
-            size_t left_idx = settings.split_view_offset % visible_nodes.size();
-            size_t right_idx = (settings.split_view_offset + 1) % visible_nodes.size();
-            assert(visible_nodes[left_idx]->model);
-            assert(visible_nodes[right_idx]->model);
-
-            LOG_TRACE("Creating PLY comparison split view: {} vs {}",
-                      visible_nodes[left_idx]->name, visible_nodes[right_idx]->name);
-
-            const glm::vec2 texcoord_scale(1.0f, 1.0f);
-            split_info.left_name = visible_nodes[left_idx]->name;
-            split_info.right_name = visible_nodes[right_idx]->name;
-
-            return lfs::rendering::SplitViewRequest{
-                .panels = std::array<lfs::rendering::SplitViewPanel, 2>{
-                    lfs::rendering::SplitViewPanel{
-                        .content =
-                            buildModelPanelContent(
-                                ctx,
-                                ctx.viewport,
-                                ctx.render_size,
-                                *visible_nodes[left_idx]->model,
-                                scene.getWorldTransform(visible_nodes[left_idx]->id),
-                                false,
-                                std::nullopt),
-                        .presentation =
-                            {.start_position = 0.0f,
-                             .end_position = settings.split_position,
-                             .texcoord_scale = texcoord_scale,
-                             .flip_y = std::nullopt}},
-                    lfs::rendering::SplitViewPanel{
-                        .content =
-                            buildModelPanelContent(
-                                ctx,
-                                ctx.viewport,
-                                ctx.render_size,
-                                *visible_nodes[right_idx]->model,
-                                scene.getWorldTransform(visible_nodes[right_idx]->id),
-                                false,
-                                std::nullopt),
-                        .presentation =
-                            {.start_position = settings.split_position,
-                             .end_position = 1.0f,
-                             .texcoord_scale = texcoord_scale,
-                             .flip_y = std::nullopt}}},
-                .composite = {.output_size = viewport_data.size, .background_color = settings.background_color},
-                .presentation = {.divider_color = kSplitDividerColor}};
-        }
-
-        if (settings.split_view_mode == SplitViewMode::IndependentDual) {
-            if (!ctx.model || !ctx.secondary_viewport || ctx.render_size.x <= 1 || ctx.render_size.y <= 0) {
-                return std::nullopt;
-            }
-
-            const auto layouts = makeSplitViewPanelLayouts(ctx.render_size.x, settings.split_position);
-            const glm::ivec2 left_size(layouts[0].width, ctx.render_size.y);
-            const glm::ivec2 right_size(layouts[1].width, ctx.render_size.y);
-            if (left_size.x <= 0 || right_size.x <= 0) {
-                return std::nullopt;
-            }
-
-            split_info.left_name = "Primary View";
-            split_info.right_name = "Secondary View";
-
-            return lfs::rendering::SplitViewRequest{
-                .panels = std::array<lfs::rendering::SplitViewPanel, 2>{
-                    lfs::rendering::SplitViewPanel{
-                        .content = buildModelPanelContent(
-                            ctx,
-                            ctx.viewport,
-                            left_size,
-                            *ctx.model,
-                            glm::mat4(1.0f),
-                            true,
-                            SplitViewPanelId::Left),
-                        .presentation =
-                            {.start_position = layouts[0].start_position,
-                             .end_position = layouts[0].end_position,
-                             .texcoord_scale = glm::vec2(1.0f, 1.0f),
-                             .flip_y = std::nullopt,
-                             .normalize_x_to_panel = true}},
-                    lfs::rendering::SplitViewPanel{
-                        .content = buildModelPanelContent(
-                            ctx,
-                            *ctx.secondary_viewport,
-                            right_size,
-                            *ctx.model,
-                            glm::mat4(1.0f),
-                            true,
-                            SplitViewPanelId::Right),
-                        .presentation =
-                            {.start_position = layouts[1].start_position,
-                             .end_position = layouts[1].end_position,
-                             .texcoord_scale = glm::vec2(1.0f, 1.0f),
-                             .flip_y = std::nullopt,
-                             .normalize_x_to_panel = true}}},
-                .composite = {.output_size = ctx.render_size, .background_color = settings.background_color},
-                .presentation = {.divider_color = kSplitDividerColor},
-                .prefer_batched_gaussian_render = true};
-        }
-
-        return std::nullopt;
     }
 
 } // namespace lfs::vis

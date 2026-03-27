@@ -267,7 +267,6 @@ namespace lfs::core {
             EVENT(EllipsoidVisibilityChanged, bool visible;);
             EVENT(ConsoleResult, std::string command; std::string result;);
             EVENT(SplitPositionChanged, float position;);
-            EVENT(GTComparisonModeChanged, bool enabled;);
             EVENT(FocusTrainingPanel, );
             EVENT(ToggleUI, );
             EVENT(ToggleFullscreen, );
