@@ -1018,7 +1018,13 @@
   },
   "status_bar": {
     "gt_compare": "Porownanie GT",
-    "camera": "Cam {cam_id}",
+    "camera": "Cam {}",
+    "ground_truth": "Ground Truth",
+    "ground_truth_excluded": "Ground Truth (Excluded from Training)",
+    "rendered": "Wyrenderowane",
+    "split_view": "Widok podzielony",
+    "primary_view": "Widok glowny",
+    "secondary_view": "Widok pomocniczy",
     "split": "Podzial:",
     "gpu": "GPU",
     "strategy_default": "Domyslny"

@@ -1018,7 +1018,13 @@
   },
   "status_bar": {
     "gt_compare": "GT-Vergleich",
-    "camera": "Kamera {cam_id}",
+    "camera": "Kamera {}",
+    "ground_truth": "Ground Truth",
+    "ground_truth_excluded": "Ground Truth (vom Training ausgeschlossen)",
+    "rendered": "Gerendert",
+    "split_view": "Geteilte Ansicht",
+    "primary_view": "Primaere Ansicht",
+    "secondary_view": "Sekundaere Ansicht",
     "split": "Teilung:",
     "gpu": "GPU",
     "strategy_default": "Standard"

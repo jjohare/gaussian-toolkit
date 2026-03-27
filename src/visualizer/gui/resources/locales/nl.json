@@ -1018,7 +1018,13 @@
   },
   "status_bar": {
     "gt_compare": "GT-vergelijking",
-    "camera": "Cam {cam_id}",
+    "camera": "Cam {}",
+    "ground_truth": "Ground Truth",
+    "ground_truth_excluded": "Ground Truth (Excluded from Training)",
+    "rendered": "Gerenderd",
+    "split_view": "Gesplitste weergave",
+    "primary_view": "Primaire weergave",
+    "secondary_view": "Secundaire weergave",
     "split": "Splitsing:",
     "gpu": "GPU",
     "strategy_default": "Standaard"

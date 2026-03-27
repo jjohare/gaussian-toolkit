@@ -449,6 +449,7 @@ namespace lfs::vis::input {
             {KeyTrigger{KEY_KP_SUBTRACT, MODIFIER_CTRL | MODIFIER_SHIFT}, Action::ZOOM_SPEED_DOWN, "Zoom speed down"},
             // View
             {KeyTrigger{KEY_V, MODIFIER_NONE}, Action::TOGGLE_SPLIT_VIEW, "Split view"},
+            {KeyTrigger{KEY_V, MODIFIER_SHIFT}, Action::TOGGLE_INDEPENDENT_SPLIT_VIEW, "Independent split"},
             {KeyTrigger{KEY_G, MODIFIER_NONE}, Action::TOGGLE_GT_COMPARISON, "GT comparison"},
             {KeyTrigger{KEY_T, MODIFIER_NONE}, Action::CYCLE_PLY, "Cycle PLY"},
             // Editing (Delete is mode-specific, added below)
@@ -588,6 +589,7 @@ namespace lfs::vis::input {
         case Action::ZOOM_SPEED_UP: return "Increase Zoom Speed";
         case Action::ZOOM_SPEED_DOWN: return "Decrease Zoom Speed";
         case Action::TOGGLE_SPLIT_VIEW: return "Toggle Split View";
+        case Action::TOGGLE_INDEPENDENT_SPLIT_VIEW: return "Toggle Independent Split View";
         case Action::TOGGLE_GT_COMPARISON: return "Toggle GT Comparison";
         case Action::TOGGLE_DEPTH_MODE: return "Toggle Depth Box";
         case Action::CYCLE_PLY: return "Cycle PLY";
@@ -903,6 +905,7 @@ namespace lfs::vis::input {
         case Action::ZOOM_SPEED_UP:
         case Action::ZOOM_SPEED_DOWN:
         case Action::TOGGLE_SPLIT_VIEW:
+        case Action::TOGGLE_INDEPENDENT_SPLIT_VIEW:
         case Action::TOGGLE_GT_COMPARISON:
         case Action::CYCLE_SELECTION_VIS:
         case Action::PIE_MENU:

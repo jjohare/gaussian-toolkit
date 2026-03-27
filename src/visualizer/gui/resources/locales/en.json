@@ -967,7 +967,13 @@
   },
   "status_bar": {
     "gt_compare": "GT Compare",
-    "camera": "Cam {cam_id}",
+    "camera": "Cam {}",
+    "ground_truth": "Ground Truth",
+    "ground_truth_excluded": "Ground Truth (Excluded from Training)",
+    "rendered": "Rendered",
+    "split_view": "Split View",
+    "primary_view": "Primary View",
+    "secondary_view": "Secondary View",
     "split": "Split:",
     "gpu": "GPU",
     "strategy_default": "Default"

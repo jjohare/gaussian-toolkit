@@ -185,6 +185,24 @@ namespace lfs::vis {
         EXPECT_EQ(router.hoverTarget(2500.0, 2500.0), input::InputTarget::None);
     }
 
+    TEST_F(InputControllerFocusTest, SplitToggleClearsActiveCameraDrag) {
+        Viewport viewport(200, 200);
+        InputController controller(nullptr, viewport);
+        input::InputRouter router;
+        router.setInputController(&controller);
+        controller.setInputRouter(&router);
+
+        router.beginMouseButton(input::ACTION_PRESS, 40.0, 50.0);
+        controller.handleMouseButton(static_cast<int>(input::AppMouseButton::MIDDLE),
+                                     input::ACTION_PRESS, 40.0, 50.0);
+
+        ASSERT_TRUE(controller.isContinuousInputActive());
+
+        core::events::cmd::ToggleSplitView{}.emit();
+
+        EXPECT_FALSE(controller.isContinuousInputActive());
+    }
+
     TEST_F(InputControllerFocusTest, PointerTargetsExposeHoverAndCapturedTargets) {
         Viewport viewport(200, 200);
         InputController controller(nullptr, viewport);

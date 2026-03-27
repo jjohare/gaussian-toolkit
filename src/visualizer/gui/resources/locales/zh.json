@@ -1018,7 +1018,13 @@
   },
   "status_bar": {
     "gt_compare": "GT 对比",
-    "camera": "相机 {cam_id}",
+    "camera": "相机 {}",
+    "ground_truth": "Ground Truth",
+    "ground_truth_excluded": "Ground Truth (Excluded from Training)",
+    "rendered": "Rendered",
+    "split_view": "Split View",
+    "primary_view": "Primary View",
+    "secondary_view": "Secondary View",
     "split": "分屏：",
     "gpu": "GPU",
     "strategy_default": "默认"

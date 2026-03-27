@@ -53,6 +53,7 @@ namespace lfs::vis::input {
         ZOOM_SPEED_DOWN,
         // View
         TOGGLE_SPLIT_VIEW,
+        TOGGLE_INDEPENDENT_SPLIT_VIEW,
         TOGGLE_GT_COMPARISON,
         TOGGLE_DEPTH_MODE, // Deprecated: migrated to TOGGLE_SELECTION_DEPTH_FILTER on load
         CYCLE_PLY,
