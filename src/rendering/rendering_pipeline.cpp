@@ -226,6 +226,15 @@ namespace lfs::rendering {
                      gaussian_count, preview_selection_ptr->numel());
             preview_selection_ptr = nullptr;
         }
+        // The dual path can render the live brush highlight from each view's cursor state
+        // without mutating the shared transient mask. Suppress the shared write when both
+        // views have active cursors so two streams never race on the same preview buffer.
+        if (preview_selection_ptr != nullptr &&
+            requests[0].cursor_active &&
+            requests[1].cursor_active) {
+            LOG_TRACE("Disabling shared preview_selection_tensor for batched dual render with two active cursors");
+            preview_selection_ptr = nullptr;
+        }
 
         const Tensor* deleted_mask_ptr = requests[0].deleted_mask;
         if (!tensorMatchesGaussianCount(deleted_mask_ptr, gaussian_count)) {

@@ -161,12 +161,10 @@ namespace lfs::vis {
 
                 if (panel_index < metadata_.depth_panel_count && panel_index < metadata_.depth_panels.size()) {
                     const auto& depth_panel = metadata_.depth_panels[panel_index];
-                    if (!panel || metadata_.depth_panel_count == 1) {
-                        panel_start_x =
-                            static_cast<int>(std::lround(static_cast<float>(viewport_width) * depth_panel.start_position));
-                        panel_end_x =
-                            static_cast<int>(std::lround(static_cast<float>(viewport_width) * depth_panel.end_position));
-                    }
+                    panel_start_x =
+                        static_cast<int>(std::lround(static_cast<float>(viewport_width) * depth_panel.start_position));
+                    panel_end_x =
+                        static_cast<int>(std::lround(static_cast<float>(viewport_width) * depth_panel.end_position));
                     panel_viewport_width = std::max(panel_end_x - panel_start_x, 1);
                     if (!panel) {
                         panel_local_x -= panel_start_x;

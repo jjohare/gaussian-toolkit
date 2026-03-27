@@ -15,6 +15,7 @@
 #include "visualizer/rendering/split_view_service.hpp"
 #include "visualizer/rendering/viewport_artifact_service.hpp"
 #include "visualizer/rendering/viewport_frame_lifecycle_service.hpp"
+#include "visualizer/rendering/viewport_request_builder.hpp"
 #include "visualizer/scene/scene_manager.hpp"
 
 #include <filesystem>
@@ -195,6 +196,45 @@ namespace lfs::vis {
         EXPECT_EQ(artifacts.artifactGeneration(), generation_after_first_change);
     }
 
+    TEST(ViewportArtifactServiceTest, ExplicitSplitPanelSamplingUsesPanelLocalCoordinates) {
+        ViewportArtifactService artifacts;
+
+        auto left_depth = lfs::core::Tensor::from_vector(
+            std::vector<float>(512, 1.0f),
+            {size_t{1}, size_t{1}, size_t{512}},
+            lfs::core::Device::CPU).cuda();
+        auto right_values = std::vector<float>(512, 2.0f);
+        right_values[256] = 42.0f;
+        auto right_depth = lfs::core::Tensor::from_vector(
+            right_values,
+            {size_t{1}, size_t{1}, size_t{512}},
+            lfs::core::Device::CPU).cuda();
+
+        FrameResources resources;
+        resources.cached_metadata = CachedRenderMetadata{
+            .depth_panels =
+                {CachedRenderPanelMetadata{
+                     .depth = std::make_shared<lfs::core::Tensor>(std::move(left_depth)),
+                     .start_position = 0.0f,
+                     .end_position = 0.5f,
+                 },
+                 CachedRenderPanelMetadata{
+                     .depth = std::make_shared<lfs::core::Tensor>(std::move(right_depth)),
+                     .start_position = 0.5f,
+                     .end_position = 1.0f,
+                 }},
+            .depth_panel_count = 2,
+            .valid = true,
+            .depth_is_ndc = false,
+        };
+        resources.cached_result_size = {1024, 1};
+        artifacts.updateFromFrameResources(resources, false);
+
+        EXPECT_FLOAT_EQ(
+            artifacts.sampleLinearDepthAt(256, 0, {1024, 1}, nullptr, SplitViewPanelId::Right),
+            42.0f);
+    }
+
     TEST(ViewportFrameLifecycleServiceTest, MissingViewportOutputForcesFreshRedraw) {
         ViewportFrameLifecycleService service;
 
@@ -204,6 +244,31 @@ namespace lfs::vis {
         EXPECT_EQ(
             service.requiredDirtyMask(false, false, SplitViewMode::PLYComparison),
             DirtyFlag::ALL | DirtyFlag::SPLIT_VIEW);
+    }
+
+    TEST(ViewportRequestBuilderTest, CursorPreviewTargetsOnlyItsSplitPanel) {
+        Viewport viewport;
+        RenderSettings settings;
+        FrameContext ctx{
+            .viewport = viewport,
+            .settings = settings,
+            .render_size = {800, 600},
+            .cursor_preview =
+                {.active = true,
+                 .x = 120.0f,
+                 .y = 80.0f,
+                 .radius = 24.0f,
+                 .add_mode = true,
+                 .panel = SplitViewPanelId::Right},
+        };
+
+        const auto left_request = buildViewportRenderRequest(
+            ctx, {400, 600}, &ctx.viewport, SplitViewPanelId::Left);
+        const auto right_request = buildViewportRenderRequest(
+            ctx, {400, 600}, &ctx.viewport, SplitViewPanelId::Right);
+
+        EXPECT_FALSE(left_request.overlay.cursor.enabled);
+        EXPECT_TRUE(right_request.overlay.cursor.enabled);
     }
 
     TEST(RenderPassSensitivityTest, SplitViewToggleInvalidatesBaseViewportContent) {
