@@ -234,15 +234,17 @@ namespace lfs::vis {
         ViewportArtifactService artifacts;
 
         auto left_depth = lfs::core::Tensor::from_vector(
-            std::vector<float>(512, 1.0f),
-            {size_t{1}, size_t{1}, size_t{512}},
-            lfs::core::Device::CPU).cuda();
+                              std::vector<float>(512, 1.0f),
+                              {size_t{1}, size_t{1}, size_t{512}},
+                              lfs::core::Device::CPU)
+                              .cuda();
         auto right_values = std::vector<float>(512, 2.0f);
         right_values[256] = 42.0f;
         auto right_depth = lfs::core::Tensor::from_vector(
-            right_values,
-            {size_t{1}, size_t{1}, size_t{512}},
-            lfs::core::Device::CPU).cuda();
+                               right_values,
+                               {size_t{1}, size_t{1}, size_t{512}},
+                               lfs::core::Device::CPU)
+                               .cuda();
 
         FrameResources resources;
         resources.cached_metadata = CachedRenderMetadata{

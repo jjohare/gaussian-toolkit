@@ -118,7 +118,7 @@ namespace lfs::vis {
                                   .gaussian_render = std::nullopt,
                                   .point_cloud_render = std::nullopt,
                                   .texture_id = res.cached_gpu_frame->color.id},
-                    .presentation =
+                             .presentation =
                                  {.start_position = ctx.settings.split_position,
                                   .end_position = 1.0f,
                                   .texcoord_scale = res.gt_context->render_texcoord_scale,

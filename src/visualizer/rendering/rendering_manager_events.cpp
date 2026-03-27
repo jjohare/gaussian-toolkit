@@ -56,8 +56,8 @@ namespace lfs::vis {
         }
         applySplitModeChange(result);
         LOG_INFO("Split view: {}", result.current_mode == SplitViewMode::IndependentDual
-                                      ? "independent dual-camera mode"
-                                      : "disabled");
+                                       ? "independent dual-camera mode"
+                                       : "disabled");
     }
 
     void RenderingManager::handleToggleGTComparison() {

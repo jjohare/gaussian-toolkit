@@ -5,8 +5,8 @@
 #include "viewport_artifact_service.hpp"
 #include "core/cuda_debug.hpp"
 #include "rendering/rendering.hpp"
-#include <cuda_runtime.h>
 #include <cmath>
+#include <cuda_runtime.h>
 #include <glad/glad.h>
 #include <limits>
 

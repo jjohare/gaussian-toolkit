@@ -215,7 +215,7 @@ namespace lfs::rendering {
                 static_cast<int>(info.kind)));
         }
 #endif
-    }
+    } // namespace
 
     // Implementation for CudaGraphicsResourceDeleter
     void CudaGraphicsResourceDeleter::operator()(void* resource) const {
