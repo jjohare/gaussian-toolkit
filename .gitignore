@@ -19,6 +19,8 @@ data
 !src/python/scripts/manage_stubs.py
 !tests/python/**/*.py
 !docs/plugins/examples/**/*.py
+!src/pipeline/**/*.py
+!scripts/test_*.py
 .venv/
 *.png
 !src/**/assets/**/*.png
