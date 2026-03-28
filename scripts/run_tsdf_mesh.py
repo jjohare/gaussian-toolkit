@@ -628,14 +628,22 @@ def run_tsdf_pipeline(
     stats["raw_mesh_vertices"] = len(mesh.vertices)
     stats["raw_mesh_faces"] = len(mesh.faces)
 
-    # 8. Clean mesh
+    # 8. Clean mesh -- decimate first if very large, then clean
     t0 = time.perf_counter()
     cleaner = MeshCleaner()
+
+    if len(mesh.faces) > target_faces * 4:
+        # For very large meshes, decimate first to avoid slow component analysis
+        logger.info("Pre-decimating from %d to %d faces before cleaning",
+                    len(mesh.faces), target_faces * 2)
+        mesh = cleaner.decimate(mesh, target_faces * 2)
+        mesh = cleaner.remove_degenerate_faces(mesh)
+
     mesh = cleaner.clean(
         mesh,
         target_faces=target_faces,
         smooth_iterations=5,
-        min_component_ratio=0.1,  # aggressive: keep only large components
+        min_component_ratio=0.1,
     )
     stats["timings"]["mesh_clean"] = time.perf_counter() - t0
     stats["final_vertices"] = len(mesh.vertices)
