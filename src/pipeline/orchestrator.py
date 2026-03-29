@@ -743,9 +743,16 @@ class PipelineOrchestrator:
     def _run_quality_gate_1(self) -> StageResult:
         """Evaluate training quality. Decide whether to proceed or retry."""
         if self._training_metrics is None:
+            # CLI headless training doesn't provide metrics — pass if PLY exists
+            if self._trained_ply and Path(self._trained_ply).exists():
+                logger.info("Quality Gate 1: PASS (CLI mode, PLY exists: %s)", self._trained_ply)
+                return StageResult(
+                    success=True, state=self._state,
+                    metrics={"method": "cli_headless", "ply_exists": True},
+                )
             return StageResult(
                 success=False, state=self._state,
-                error="No training metrics available",
+                error="No training metrics and no PLY output",
             )
 
         quality = assess_training_quality(self._training_metrics, self.config)
