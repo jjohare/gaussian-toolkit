@@ -86,22 +86,33 @@ Current tools can reconstruct video as monolithic 3D Gaussian Splat scenes but c
 
 ## Technical Architecture
 
+### Deployment: Consolidated Docker
+
+The entire pipeline runs in a single consolidated Docker container on a dedicated workstation:
+
+- **Host**: 192.168.2.48 (HP-Desktop)
+- **GPUs**: 2x RTX 6000 Ada (96 GB total VRAM)
+- **CPU**: AMD Threadripper PRO 48-core
+- **RAM**: 251 GB
+- **Model staging**: 128 GB on `/home/john/comfyui-models-staging`
+- **Services**: Web UI :7860, ComfyUI :8188, LichtFeld MCP :45677, VNC :5901
+
 ### Component Stack
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                ORCHESTRATOR AGENT                     │
-│     State machine, quality decisions, retry logic     │
-├──────────┬──────────┬──────────┬───────────────────┤
-│ Ingest   │ Recon    │ Decompose│ Assemble           │
-│ Agent    │ Agent    │ Agent    │ Agent              │
-├──────────┼──────────┼──────────┼───────────────────┤
-│SplatReady│COLMAP    │Gaussian  │OpenUSD Python      │
-│PyAV      │LichtFeld │Grouping  │LichtFeld export    │
-│OpenCV    │MCP 70+   │SAGA      │Blender (materials) │
-│          │          │SuGaR/SOF │                     │
-│          │          │ComfyUI   │                     │
-└──────────┴──────────┴──────────┴───────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                ORCHESTRATOR AGENT                         │
+│     State machine, quality decisions, retry logic         │
+├──────────┬──────────┬──────────┬───────────────────────┤
+│ Ingest   │ Recon    │ Decompose│ Assemble               │
+│ Agent    │ Agent    │ Agent    │ Agent                  │
+├──────────┼──────────┼──────────┼───────────────────────┤
+│SplatReady│COLMAP    │SAM3      │OpenUSD Python          │
+│PyAV      │LichtFeld │SAM2      │LichtFeld export        │
+│OpenCV    │MCP 70+   │Hunyuan3D │Blender (materials)     │
+│Web UI    │          │FLUX/CUI  │                         │
+│ (:7860)  │          │TSDF/O3D  │                         │
+└──────────┴──────────┴──────────┴───────────────────────┘
 ```
 
 ### Data Flow
@@ -135,14 +146,19 @@ video.mp4
 
 | Dependency | Purpose | License | Integration |
 |-----------|---------|---------|-------------|
+| SAM3 | Concept segmentation (4M concepts) | Apache-2.0 | Python, upgrading from SAM2 |
+| SAM2 | 2D instance segmentation (fallback) | Apache-2.0 | Python, validated |
+| Hunyuan3D 2.0 | Multi-view to textured mesh | Tencent | Python client, per-object |
 | Gaussian Grouping | Joint training + segmentation | Apache-2.0 | Python, replaces standard training |
 | SAGA | Interactive refinement | Apache-2.0 | Python, post-hoc on any model |
 | SuGaR | Mesh extraction + UV texturing | Unspecified* | Python, per-object |
 | SOF/GOF | High-quality mesh extraction | Unspecified* | C++/CUDA port |
-| Open3D | TSDF fusion fallback | MIT | Python |
+| Open3D | TSDF fusion (22K verts, 49K faces) | MIT | Python, validated |
 | xatlas | UV atlas generation | MIT | C++ lib |
 | usd-core | USD scene composition | Modified Apache 2.0 | Python |
-| SAM2 | 2D instance segmentation | Apache-2.0 | Python, preprocessing |
+| ComfyUI | Node workflows (SAM3D/TRELLIS) | GPL-3.0 | Docker :8188 |
+| FLUX | Inpainting via ComfyUI | Apache-2.0 | ComfyUI workflow |
+| Flask | Web upload interface | BSD | Python :7860 |
 
 *SuGaR and SOF/GOF are academic code. Licensing requires direct author contact for commercial use.
 

@@ -50,6 +50,13 @@ class DecomposeConfig:
     selection_method: str = "by_description"
     min_object_gaussians: int = 100
     descriptions: list[str] = field(default_factory=list)
+    use_sam3: bool = True
+    sam3_confidence_threshold: float = 0.5
+    sam3_concepts: list[str] = field(default_factory=lambda: [
+        "paintings", "frames", "sculptures", "furniture",
+        "walls", "floor", "ceiling", "fixtures", "doorways",
+    ])
+    sam3_fallback_to_sam2: bool = True
 
 
 @dataclass

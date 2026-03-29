@@ -574,10 +574,27 @@ class PipelineOrchestrator:
         )
 
     def _run_decompose(self) -> StageResult:
-        """Use semantic selection to identify scene objects."""
-        descriptions = self.config.decompose.descriptions
+        """Use SAM3 concept segmentation or MCP semantic selection to identify scene objects."""
+        decompose_cfg = self.config.decompose
+
+        # --- SAM3 concept segmentation path ---
+        if decompose_cfg.use_sam3 and self._frame_dir is not None:
+            try:
+                return self._run_decompose_sam3()
+            except Exception as exc:
+                if decompose_cfg.sam3_fallback_to_sam2:
+                    logger.warning(
+                        "SAM3 decomposition failed (%s), falling back to MCP selection", exc,
+                    )
+                else:
+                    return StageResult(
+                        success=False, state=self._state,
+                        error=f"SAM3 decomposition failed: {exc}",
+                    )
+
+        # --- Legacy MCP description-based path ---
+        descriptions = decompose_cfg.descriptions
         if not descriptions:
-            # Ask the advisor for decomposition suggestions
             try:
                 advice = self.mcp.ask_advisor(
                     "What are the main objects in this scene? "
@@ -588,7 +605,6 @@ class PipelineOrchestrator:
                 descriptions = []
 
         if not descriptions:
-            # No decomposition needed; treat whole scene as one object
             logger.info("No object descriptions; skipping decomposition")
             self._extracted_objects = [{"label": "full_scene", "count": -1}]
             return StageResult(
@@ -601,7 +617,7 @@ class PipelineOrchestrator:
         for desc in descriptions:
             try:
                 sel = self.mcp.selection_by_description(desc)
-                if sel.count >= self.config.decompose.min_object_gaussians:
+                if sel.count >= decompose_cfg.min_object_gaussians:
                     objects.append({"label": desc, "count": sel.count})
                 else:
                     logger.info("Skipping '%s': only %d gaussians", desc, sel.count)
@@ -616,6 +632,87 @@ class PipelineOrchestrator:
             success=True, state=self._state,
             metrics={"object_count": len(objects)},
             artifacts={"objects": json.dumps(objects)},
+        )
+
+    def _run_decompose_sam3(self) -> StageResult:
+        """SAM3-based scene decomposition using text concept segmentation."""
+        import cv2
+        from pipeline.sam3_segmentor import SAM3Segmentor
+
+        decompose_cfg = self.config.decompose
+        concepts = decompose_cfg.sam3_concepts
+        if not concepts:
+            concepts = decompose_cfg.descriptions or [
+                "paintings", "frames", "sculptures", "furniture",
+                "walls", "floor", "ceiling", "fixtures", "doorways",
+            ]
+
+        logger.info("SAM3 decompose: concepts=%s, frame_dir=%s", concepts, self._frame_dir)
+
+        seg = SAM3Segmentor(
+            device="cuda",
+            confidence_threshold=decompose_cfg.sam3_confidence_threshold,
+        )
+
+        # Segment the first frame to identify objects
+        frame_paths = sorted(
+            p for p in self._frame_dir.iterdir()
+            if p.suffix.lower() in (".jpg", ".jpeg", ".png")
+        )
+        if not frame_paths:
+            return StageResult(
+                success=False, state=self._state,
+                error=f"No frames found in {self._frame_dir}",
+            )
+
+        image = cv2.imread(str(frame_paths[0]))
+        if image is None:
+            return StageResult(
+                success=False, state=self._state,
+                error=f"Failed to read frame {frame_paths[0]}",
+            )
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        result, id_to_concept = seg.segment_by_concepts(
+            image, concepts,
+            confidence_threshold=decompose_cfg.sam3_confidence_threshold,
+        )
+
+        objects: list[dict[str, Any]] = []
+        for obj_id in result.object_ids:
+            concept = id_to_concept.get(int(obj_id), "unknown")
+            mask_pixels = int(result.masks[result.object_ids == obj_id].sum())
+            objects.append({
+                "label": concept,
+                "object_id": int(obj_id),
+                "mask_pixels": mask_pixels,
+            })
+
+        if not objects:
+            objects = [{"label": "full_scene", "count": -1}]
+
+        # Save SAM3 masks for downstream stages
+        masks_dir = self.output_dir / "sam3_masks"
+        masks_dir.mkdir(parents=True, exist_ok=True)
+        import numpy as np
+        for i, obj_id in enumerate(result.object_ids):
+            mask_path = masks_dir / f"mask_{int(obj_id):04d}.npy"
+            np.save(str(mask_path), result.masks[i])
+
+        seg.unload()
+
+        self._extracted_objects = objects
+        return StageResult(
+            success=True, state=self._state,
+            metrics={
+                "object_count": len(objects),
+                "segmentation_method": "sam3",
+                "concepts_used": concepts,
+            },
+            artifacts={
+                "objects": json.dumps(objects),
+                "sam3_masks_dir": str(masks_dir),
+            },
         )
 
     def _run_extract_objects(self) -> StageResult:

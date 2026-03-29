@@ -150,10 +150,14 @@ RUN pip3 install --break-system-packages --ignore-installed \
         trimesh xatlas pymeshfix fast-simplification scikit-image \
         pillow piexif av yt-dlp huggingface_hub requests aiohttp flask sqlalchemy \
         plyfile numpy scipy opencv-python-headless \
-        segment-anything \
+        segment-anything psutil \
     && pip3 install --break-system-packages \
         "sam-2==1.1.0" || pip3 install --break-system-packages \
-        "segment-anything-2" || echo "SAM2 pip install skipped — using ComfyUI SAM2 nodes instead"
+        "segment-anything-2" || echo "SAM2 pip install skipped — using ComfyUI SAM2 nodes instead" \
+    && pip3 install --break-system-packages \
+        sam3 || pip3 install --break-system-packages \
+        "sam3 @ git+https://github.com/facebookresearch/sam3.git" \
+        || echo "SAM3 pip install skipped — text-prompted segmentation unavailable"
 
 # USD requires python3.11 — isolated venv
 RUN python3.11 -m venv /opt/venv-usd && \
