@@ -36,6 +36,10 @@
     .log-container::-webkit-scrollbar { width: 6px; }
     .log-container::-webkit-scrollbar-track { background: #1a1d27; }
     .log-container::-webkit-scrollbar-thumb { background: #3a3d4a; border-radius: 3px; }
+    .scrollbar-thin::-webkit-scrollbar { height: 6px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: #1a1d27; border-radius: 3px; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #3a3d4a; border-radius: 3px; }
+    .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #4a4d5a; }
     @keyframes pulse-border { 0%, 100% { border-color: #6366f1; } 50% { border-color: #818cf8; } }
     .stage-active { animation: pulse-border 2s ease-in-out infinite; }
     .fade-in { animation: fadeIn 0.3s ease-in; }
@@ -466,6 +470,9 @@
           // Start SSE if job is active
           if (!['completed', 'failed', 'cancelled'].includes(job.state)) {
             startSSE(jobId);
+            startCarouselRefresh(jobId);
+          } else {
+            loadCarouselPreviews(jobId);
           }
         })
         .catch(() => {});
@@ -590,10 +597,13 @@
           case 'previews':
             // Re-fetch full job to get updated previews
             fetch(`/status/${jobId}`).then(r => r.json()).then(renderPreviews).catch(() => {});
+            loadCarouselPreviews(jobId);
             break;
           case 'done':
             eventSource.close();
             eventSource = null;
+            stopCarouselRefresh();
+            loadCarouselPreviews(jobId);
             refreshJobs();
             // Refresh detail
             fetch(`/status/${jobId}`).then(r => r.json()).then(renderDetail).catch(() => {});
@@ -632,6 +642,8 @@
     function closeDetail() {
       document.getElementById('job-detail').classList.add('hidden');
       if (eventSource) { eventSource.close(); eventSource = null; }
+      stopCarouselRefresh();
+      document.getElementById('carousel-section').classList.add('hidden');
       currentJobId = null;
     }
 

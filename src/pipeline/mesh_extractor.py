@@ -1,8 +1,10 @@
 """TSDF-based mesh extraction from Gaussian splat objects.
 
-Renders depth maps from multiple viewpoints via LichtFeld MCP,
-fuses them into a TSDF volume, and extracts a polygonal mesh
-using marching cubes.
+Supports two rendering backends:
+- gsplat: GPU-accelerated gaussian splatting for high-quality depth+color (preferred)
+- LichtFeld MCP: subprocess-based rendering via the studio's MCP server (legacy)
+
+Pipeline: render depth from multiple views -> TSDF fusion -> marching cubes -> mesh
 """
 
 from __future__ import annotations
@@ -10,10 +12,10 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
-import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 from skimage.measure import marching_cubes
@@ -25,6 +27,222 @@ logger = logging.getLogger(__name__)
 
 LFS_MCP = "/usr/local/bin/lfs-mcp"
 
+
+# ---------------------------------------------------------------------------
+# gsplat PLY loader
+# ---------------------------------------------------------------------------
+
+def load_3dgs_ply(path: str) -> dict:
+    """Load a 3DGS PLY file into gsplat-ready tensors on CUDA.
+
+    Expects the standard 3DGS format with properties:
+        x,y,z, nx,ny,nz, f_dc_0..2, f_rest_0..44, opacity, scale_0..2, rot_0..3
+
+    Returns a dict with keys: means, scales, quats, opacities, sh_coeffs,
+    colors_dc (numpy RGB 0-1), count.
+    """
+    import torch
+    from plyfile import PlyData
+
+    ply = PlyData.read(path)
+    v = ply['vertex']
+    n = len(v['x'])
+
+    means = torch.tensor(
+        np.column_stack([v['x'], v['y'], v['z']]),
+        dtype=torch.float32, device='cuda',
+    )
+
+    # Scales stored as log-space; apply exp
+    scales = torch.exp(torch.tensor(
+        np.column_stack([v['scale_0'], v['scale_1'], v['scale_2']]),
+        dtype=torch.float32, device='cuda',
+    ))
+
+    # Quaternions wxyz; normalize
+    quats = torch.tensor(
+        np.column_stack([v['rot_0'], v['rot_1'], v['rot_2'], v['rot_3']]),
+        dtype=torch.float32, device='cuda',
+    )
+    quats = quats / quats.norm(dim=1, keepdim=True)
+
+    # Opacities stored as logit; apply sigmoid
+    opacities = torch.sigmoid(torch.tensor(
+        np.array(v['opacity'], dtype=np.float32),
+        dtype=torch.float32, device='cuda',
+    ))
+
+    # SH coefficients: DC (3) + rest (45) = 48 -> [N, 16, 3]
+    sh_dc = np.column_stack([v['f_dc_0'], v['f_dc_1'], v['f_dc_2']]).astype(np.float32)
+    sh_rest = np.column_stack(
+        [v[f'f_rest_{i}'] for i in range(45)]
+    ).astype(np.float32)
+    sh_dc_r = sh_dc.reshape(n, 1, 3)
+    sh_rest_r = sh_rest.reshape(n, 15, 3)
+    sh_all = np.concatenate([sh_dc_r, sh_rest_r], axis=1)  # [N, 16, 3]
+    sh_coeffs = torch.tensor(sh_all, dtype=torch.float32, device='cuda')
+
+    # Vertex colors from SH DC band (C0 = 0.2820948)
+    colors_dc = np.clip(0.5 + 0.2820948 * sh_dc, 0.0, 1.0)
+
+    logger.info("Loaded 3DGS PLY: %d gaussians from %s", n, path)
+    return {
+        'means': means,
+        'scales': scales,
+        'quats': quats,
+        'opacities': opacities,
+        'sh_coeffs': sh_coeffs,
+        'colors_dc': colors_dc,
+        'count': n,
+    }
+
+
+# ---------------------------------------------------------------------------
+# gsplat rendering
+# ---------------------------------------------------------------------------
+
+def render_gsplat(
+    gaussians: dict,
+    viewmat: 'torch.Tensor',
+    K: 'torch.Tensor',
+    width: int,
+    height: int,
+    sh_degree: int = 3,
+    near_plane: float = 0.01,
+    far_plane: float = 1000.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Render RGB + expected-depth + alpha using gsplat rasterization.
+
+    Args:
+        gaussians: Dict from load_3dgs_ply.
+        viewmat: [4,4] world-to-camera transform (float32, CUDA).
+        K: [3,3] camera intrinsics matrix (float32, CUDA).
+        width: Image width in pixels.
+        height: Image height in pixels.
+
+    Returns:
+        (depth_map, color_map, alpha_map) as numpy float32 arrays.
+        depth_map: [H,W], color_map: [H,W,3], alpha_map: [H,W].
+        Invalid depth (alpha < 0.5) is set to 0.
+    """
+    import torch
+    from gsplat import rasterization
+
+    with torch.no_grad():
+        renders, alphas, _ = rasterization(
+            means=gaussians['means'],
+            quats=gaussians['quats'],
+            scales=gaussians['scales'],
+            opacities=gaussians['opacities'],
+            colors=gaussians['sh_coeffs'],
+            viewmats=viewmat.unsqueeze(0),
+            Ks=K.unsqueeze(0),
+            width=width,
+            height=height,
+            render_mode='RGB+ED',
+            sh_degree=sh_degree,
+            near_plane=near_plane,
+            far_plane=far_plane,
+            packed=True,
+            rasterize_mode='antialiased',
+        )
+
+    rgb = renders[0, :, :, :3].cpu().numpy()
+    depth = renders[0, :, :, 3].cpu().numpy()
+    alpha = alphas[0, :, :, 0].cpu().numpy()
+
+    # Zero out depth where alpha is too low (unreliable)
+    depth[alpha < 0.5] = 0.0
+
+    return depth, rgb, alpha
+
+
+# ---------------------------------------------------------------------------
+# Camera generation from gaussian distribution
+# ---------------------------------------------------------------------------
+
+def generate_orbit_cameras_gsplat(
+    means: 'torch.Tensor',
+    num_views: int,
+    image_size: int,
+    focal_factor: float = 0.8,
+    distance_factor: float = 2.5,
+) -> list[tuple['torch.Tensor', 'torch.Tensor']]:
+    """Generate orbit cameras covering the scene based on gaussian positions.
+
+    Uses Fibonacci sphere sampling for near-uniform coverage.
+
+    Args:
+        means: [N,3] gaussian positions tensor (CUDA).
+        num_views: Number of camera viewpoints.
+        image_size: Render resolution (square).
+        focal_factor: Focal length as fraction of image size.
+        distance_factor: Camera distance as multiple of scene extent.
+
+    Returns:
+        List of (viewmat_4x4, K_3x3) tensor pairs on CUDA.
+    """
+    import torch
+
+    pts = means.cpu().numpy()
+    centroid = pts.mean(axis=0)
+    p5, p95 = np.percentile(pts, [5, 95], axis=0)
+    extent = np.max(p95 - p5)
+    distance = extent * distance_factor
+
+    focal = image_size * focal_factor
+    K = torch.tensor([
+        [focal, 0.0, image_size / 2.0],
+        [0.0, focal, image_size / 2.0],
+        [0.0, 0.0, 1.0],
+    ], dtype=torch.float32, device='cuda')
+
+    cameras = []
+    golden_ratio = (1.0 + np.sqrt(5.0)) / 2.0
+
+    for i in range(num_views):
+        # Fibonacci sphere
+        theta = np.arccos(1.0 - 2.0 * (i + 0.5) / num_views)
+        phi = 2.0 * np.pi * i / golden_ratio
+
+        pos = centroid + distance * np.array([
+            np.sin(theta) * np.cos(phi),
+            np.sin(theta) * np.sin(phi),
+            np.cos(theta),
+        ], dtype=np.float64)
+
+        # Look-at: camera looks toward centroid
+        forward = centroid - pos
+        forward = forward / (np.linalg.norm(forward) + 1e-12)
+
+        # Choose up vector that is not parallel to forward
+        up_world = np.array([0.0, 0.0, 1.0])
+        if abs(np.dot(forward, up_world)) > 0.99:
+            up_world = np.array([0.0, 1.0, 0.0])
+
+        right = np.cross(forward, up_world)
+        right = right / (np.linalg.norm(right) + 1e-12)
+        up = np.cross(right, forward)
+        up = up / (np.linalg.norm(up) + 1e-12)
+
+        # Build world-to-camera matrix (COLMAP convention: +Z forward)
+        # R columns = [right, -up, forward] in world space
+        # viewmat = [R^T | -R^T @ pos]
+        R = np.stack([right, -up, forward], axis=0)  # 3x3, rows
+        t = -R @ pos
+
+        viewmat = torch.eye(4, dtype=torch.float32, device='cuda')
+        viewmat[:3, :3] = torch.tensor(R, dtype=torch.float32, device='cuda')
+        viewmat[:3, 3] = torch.tensor(t, dtype=torch.float32, device='cuda')
+
+        cameras.append((viewmat, K))
+
+    return cameras
+
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
 
 @dataclass
 class CameraIntrinsics:
@@ -61,6 +279,10 @@ class TSDFConfig:
     mcp_endpoint: str = "http://127.0.0.1:45677/mcp"
 
 
+# ---------------------------------------------------------------------------
+# TSDF Volume
+# ---------------------------------------------------------------------------
+
 class TSDFVolume:
     """Truncated Signed Distance Function volume for depth fusion.
 
@@ -88,7 +310,7 @@ class TSDFVolume:
         self.weight = np.zeros((self.nx, self.ny, self.nz), dtype=np.float32)
         self.color = np.zeros((self.nx, self.ny, self.nz, 3), dtype=np.float32)
 
-    def _voxel_centers(self) -> np.ndarray:
+    def _voxel_centers(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Compute world coordinates of all voxel centers."""
         x = np.arange(self.nx) * self.voxel_size + self.origin[0] + self.voxel_size / 2
         y = np.arange(self.ny) * self.voxel_size + self.origin[1] + self.voxel_size / 2
@@ -99,7 +321,7 @@ class TSDFVolume:
         self,
         depth_map: np.ndarray,
         color_image: np.ndarray,
-        intrinsics: CameraIntrinsics,
+        intrinsics: Union[CameraIntrinsics, np.ndarray],
         extrinsics: np.ndarray,
         weight: float = 1.0,
     ) -> None:
@@ -108,12 +330,29 @@ class TSDFVolume:
         Args:
             depth_map: HxW float array of depth values in meters.
             color_image: HxWx3 uint8 or float array of color values.
-            intrinsics: Camera intrinsic parameters.
-            extrinsics: 4x4 camera-to-world transform (camera pose).
+            intrinsics: CameraIntrinsics object or 3x3 numpy K matrix.
+            extrinsics: 4x4 matrix. If intrinsics is CameraIntrinsics,
+                this is camera-to-world (pose). If intrinsics is a 3x3 K
+                matrix, this is world-to-camera (viewmat).
             weight: Integration weight for this frame.
         """
         h, w = depth_map.shape[:2]
-        world_to_cam = np.linalg.inv(extrinsics)
+
+        # Unify intrinsics to fx, fy, cx, cy
+        if isinstance(intrinsics, np.ndarray):
+            # Raw K matrix [3x3], extrinsics is world-to-camera viewmat
+            fx = float(intrinsics[0, 0])
+            fy = float(intrinsics[1, 1])
+            cx = float(intrinsics[0, 2])
+            cy = float(intrinsics[1, 2])
+            world_to_cam = extrinsics.astype(np.float64)
+        else:
+            # CameraIntrinsics object, extrinsics is camera-to-world
+            fx = intrinsics.fx
+            fy = intrinsics.fy
+            cx = intrinsics.cx
+            cy = intrinsics.cy
+            world_to_cam = np.linalg.inv(extrinsics)
 
         x_coords, y_coords, z_coords = self._voxel_centers()
 
@@ -131,7 +370,10 @@ class TSDFVolume:
             xx, yy, zz = np.meshgrid(
                 x_coords[x_start:x_end], y_coords, z_coords, indexing="ij"
             )
-            pts_world = np.stack([xx.ravel(), yy.ravel(), zz.ravel(), np.ones(nx_slab * self.ny * self.nz)], axis=0)
+            pts_world = np.stack(
+                [xx.ravel(), yy.ravel(), zz.ravel(), np.ones(nx_slab * self.ny * self.nz)],
+                axis=0,
+            )
 
             # Transform to camera coordinates
             pts_cam = world_to_cam @ pts_world
@@ -145,8 +387,8 @@ class TSDFVolume:
                 continue
 
             # Project to image plane
-            u = (intrinsics.fx * cam_x / cam_z + intrinsics.cx).astype(np.float64)
-            v = (intrinsics.fy * cam_y / cam_z + intrinsics.cy).astype(np.float64)
+            u = (fx * cam_x / cam_z + cx).astype(np.float64)
+            v = (fy * cam_y / cam_z + cy).astype(np.float64)
 
             # Bounds check
             valid &= (u >= 0) & (u < w - 1) & (v >= 0) & (v < h - 1)
@@ -230,8 +472,8 @@ class TSDFVolume:
             voxel_indices[:, 0], voxel_indices[:, 1], voxel_indices[:, 2]
         ]
         vertex_colors = np.clip(vertex_colors * 255, 0, 255).astype(np.uint8)
-        alpha = np.full((len(vertex_colors), 1), 255, dtype=np.uint8)
-        vertex_colors = np.hstack([vertex_colors, alpha])
+        alpha_col = np.full((len(vertex_colors), 1), 255, dtype=np.uint8)
+        vertex_colors = np.hstack([vertex_colors, alpha_col])
 
         mesh = trimesh.Trimesh(
             vertices=verts,
@@ -243,6 +485,10 @@ class TSDFVolume:
         logger.info("Extracted mesh: %d vertices, %d faces", len(verts), len(faces))
         return mesh
 
+
+# ---------------------------------------------------------------------------
+# Legacy MCP orbit camera generation
+# ---------------------------------------------------------------------------
 
 def _generate_orbit_cameras(
     n_views: int,
@@ -269,13 +515,11 @@ def _generate_orbit_cameras(
         for i in range(views_per_ring):
             azimuth = 2.0 * np.pi * i / views_per_ring
 
-            # Camera position on sphere
             cx = distance * np.cos(elev) * np.cos(azimuth)
             cy = distance * np.cos(elev) * np.sin(azimuth)
             cz = distance * np.sin(elev)
             pos = np.array([cx, cy, cz])
 
-            # Look-at matrix (camera looks at origin, up = +Z)
             forward = -pos / np.linalg.norm(pos)
             world_up = np.array([0.0, 0.0, 1.0])
             right = np.cross(forward, world_up)
@@ -289,13 +533,17 @@ def _generate_orbit_cameras(
             extrinsics = np.eye(4, dtype=np.float64)
             extrinsics[:3, 0] = right
             extrinsics[:3, 1] = up
-            extrinsics[:3, 2] = forward  # +z = viewing direction
+            extrinsics[:3, 2] = forward
             extrinsics[:3, 3] = pos
 
             cameras.append((extrinsics, intrinsics))
 
     return cameras
 
+
+# ---------------------------------------------------------------------------
+# Legacy MCP rendering
+# ---------------------------------------------------------------------------
 
 def _call_mcp_render(
     width: int,
@@ -304,19 +552,7 @@ def _call_mcp_render(
     render_type: str = "color",
     mcp_endpoint: str = "http://127.0.0.1:45677/mcp",
 ) -> Optional[np.ndarray]:
-    """Call LichtFeld MCP render.capture to get an image.
-
-    Args:
-        width: Image width.
-        height: Image height.
-        camera_pose: 4x4 camera-to-world matrix.
-        render_type: "color" or "depth".
-        mcp_endpoint: MCP endpoint URL.
-
-    Returns:
-        numpy array of the rendered image, or None on failure.
-    """
-    # Flatten camera pose for JSON transport
+    """Call LichtFeld MCP render.capture to get an image."""
     pose_list = camera_pose.flatten().tolist()
     args = {
         "width": width,
@@ -364,10 +600,7 @@ def _render_depth_from_gaussians(
     intrinsics: CameraIntrinsics,
     mcp_endpoint: str,
 ) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-    """Render depth and color from LichtFeld MCP.
-
-    Returns (depth_map, color_image) or (None, None) on failure.
-    """
+    """Render depth and color from LichtFeld MCP."""
     depth = _call_mcp_render(
         intrinsics.width, intrinsics.height, camera_pose,
         render_type="depth", mcp_endpoint=mcp_endpoint,
@@ -379,21 +612,141 @@ def _render_depth_from_gaussians(
     return depth, color
 
 
+# ---------------------------------------------------------------------------
+# MeshExtractor
+# ---------------------------------------------------------------------------
+
 class MeshExtractor:
     """Extract polygonal meshes from Gaussian splat objects.
 
-    Pipeline:
-    1. Render depth + color from N viewpoints via LichtFeld MCP
-    2. Fuse into TSDF volume
-    3. Extract mesh via marching cubes
-    4. Clean and decimate
-
-    Can also operate on pre-rendered depth/color numpy arrays
-    when MCP is unavailable (for testing or offline use).
+    Supports three extraction modes:
+    - extract_from_gsplat: GPU rendering via gsplat -> TSDF (preferred)
+    - extract_from_mcp: Legacy MCP rendering -> TSDF
+    - extract_from_arrays: Pre-rendered depth/color -> TSDF
+    - extract_from_pointcloud: Point cloud density -> marching cubes
     """
 
     def __init__(self, config: Optional[TSDFConfig] = None):
         self.config = config or TSDFConfig()
+
+    def extract_from_gsplat(
+        self,
+        ply_path: str,
+        num_views: int = 64,
+        render_size: int = 1024,
+        target_faces: Optional[int] = None,
+    ) -> tuple[trimesh.Trimesh, list[np.ndarray], list]:
+        """Full gsplat pipeline: load PLY -> render depth+color -> TSDF -> mesh.
+
+        Args:
+            ply_path: Path to 3DGS PLY file.
+            num_views: Number of orbit viewpoints for depth rendering.
+            render_size: Square render resolution in pixels.
+            target_faces: Override face count target (uses config if None).
+
+        Returns:
+            (mesh, color_images, cameras) where:
+            - mesh: cleaned trimesh.Trimesh with vertex colors
+            - color_images: list of [H,W,3] float32 color renders
+            - cameras: list of (viewmat, K) tuples for texture baking
+        """
+        t_start = time.time()
+        target = target_faces or self.config.target_faces
+
+        # Load gaussians
+        gaussians = load_3dgs_ply(ply_path)
+        logger.info("Loaded %d gaussians in %.1fs",
+                     gaussians['count'], time.time() - t_start)
+
+        # Compute scene bounds for TSDF volume
+        pts = gaussians['means'].cpu().numpy()
+        p5, p95 = np.percentile(pts, [5, 95], axis=0)
+        center = (p5 + p95) / 2.0
+        extent = p95 - p5
+        padding = extent * 0.3
+        vol_min = p5 - padding
+        vol_max = p95 + padding
+        vol_extent = vol_max - vol_min
+
+        # Adaptive voxel size: aim for ~256-384 voxels per axis max
+        max_dim = vol_extent.max()
+        voxel_size = max(max_dim / 300.0, 0.002)
+        sdf_trunc = voxel_size * 5.0
+
+        tsdf_config = TSDFConfig(
+            voxel_size=voxel_size,
+            sdf_trunc=sdf_trunc,
+            volume_bounds_min=vol_min,
+            volume_bounds_max=vol_max,
+            target_faces=target,
+        )
+
+        logger.info("TSDF config: voxel=%.4f, trunc=%.4f, bounds=[%.2f..%.2f]",
+                     voxel_size, sdf_trunc, vol_min.min(), vol_max.max())
+
+        # Generate cameras
+        cameras = generate_orbit_cameras_gsplat(
+            gaussians['means'], num_views, render_size,
+        )
+
+        # Render and integrate
+        tsdf = TSDFVolume(tsdf_config)
+        color_images = []
+        integrated = 0
+        t_render = time.time()
+
+        for i, (viewmat, K) in enumerate(cameras):
+            depth, rgb, alpha = render_gsplat(
+                gaussians, viewmat, K, render_size, render_size,
+            )
+
+            valid_pixels = (depth > 0).sum()
+            if valid_pixels < 100:
+                logger.debug("View %d: only %d valid pixels, skipping", i, valid_pixels)
+                continue
+
+            # Store color for texture baking
+            color_images.append(rgb.copy())
+
+            # Integrate into TSDF: pass K as numpy 3x3, viewmat as numpy 4x4
+            K_np = K.cpu().numpy().astype(np.float64)
+            viewmat_np = viewmat.cpu().numpy().astype(np.float64)
+
+            # Make color HxWx3 for TSDF
+            rgb_for_tsdf = rgb.copy()
+            tsdf.integrate(depth, rgb_for_tsdf, K_np, viewmat_np)
+            integrated += 1
+
+            if (i + 1) % 16 == 0:
+                elapsed = time.time() - t_render
+                logger.info("Rendered+integrated %d/%d views (%.1fs, %.0fms/view)",
+                            i + 1, num_views, elapsed,
+                            elapsed / (i + 1) * 1000)
+
+        elapsed_render = time.time() - t_render
+        logger.info("Rendering complete: %d/%d views integrated in %.1fs",
+                     integrated, num_views, elapsed_render)
+
+        if integrated == 0:
+            raise RuntimeError("No valid depth frames from gsplat rendering")
+
+        # Extract mesh
+        mesh = tsdf.extract_mesh()
+
+        # Clean
+        cleaner = MeshCleaner()
+        mesh = cleaner.clean(
+            mesh,
+            target_faces=target,
+            smooth_iterations=self.config.smooth_iterations,
+            min_component_ratio=self.config.min_component_ratio,
+        )
+
+        total_time = time.time() - t_start
+        logger.info("gsplat mesh extraction complete: %d verts, %d faces in %.1fs",
+                     len(mesh.vertices), len(mesh.faces), total_time)
+
+        return mesh, color_images, cameras
 
     def extract_from_mcp(self) -> trimesh.Trimesh:
         """Full pipeline: render from MCP, fuse, extract, clean.
@@ -446,17 +799,7 @@ class MeshExtractor:
         extrinsics_list: list[np.ndarray],
         intrinsics: Optional[CameraIntrinsics] = None,
     ) -> trimesh.Trimesh:
-        """Extract mesh from pre-rendered depth/color arrays.
-
-        Args:
-            depth_maps: List of HxW float depth arrays.
-            color_images: List of HxWx3 color arrays (uint8 or float).
-            extrinsics_list: List of 4x4 camera-to-world matrices.
-            intrinsics: Camera intrinsics (uses defaults if None).
-
-        Returns:
-            Cleaned trimesh.Trimesh.
-        """
+        """Extract mesh from pre-rendered depth/color arrays."""
         if not (len(depth_maps) == len(color_images) == len(extrinsics_list)):
             raise ValueError("depth_maps, color_images, and extrinsics_list must have equal length")
 
@@ -488,21 +831,12 @@ class MeshExtractor:
         colors: Optional[np.ndarray] = None,
         target_faces: Optional[int] = None,
     ) -> trimesh.Trimesh:
-        """Extract mesh from a point cloud using ball-pivoting or Poisson reconstruction.
+        """Extract mesh from a point cloud using density-based marching cubes.
 
-        Falls back to convex hull if advanced reconstruction is unavailable.
-
-        Args:
-            points: Nx3 array of point positions.
-            colors: Nx3 array of point colors (0-255 uint8 or 0-1 float).
-            target_faces: Target face count for decimation.
-
-        Returns:
-            trimesh.Trimesh
+        Falls back to convex hull if advanced reconstruction fails.
         """
         target = target_faces or self.config.target_faces
 
-        # Estimate normals via PCA on local neighborhoods
         from scipy.spatial import cKDTree
         tree = cKDTree(points)
         k = min(30, len(points))
@@ -514,16 +848,13 @@ class MeshExtractor:
             centered = neighbors - neighbors.mean(axis=0)
             cov = centered.T @ centered
             eigenvalues, eigenvectors = np.linalg.eigh(cov)
-            normals[i] = eigenvectors[:, 0]  # smallest eigenvalue = normal direction
+            normals[i] = eigenvectors[:, 0]
 
-        # Orient normals outward (toward centroid-opposite direction)
         centroid = points.mean(axis=0)
         for i in range(len(normals)):
             if np.dot(normals[i], points[i] - centroid) < 0:
                 normals[i] = -normals[i]
 
-        # Use Poisson surface reconstruction via marching cubes on an implicit function
-        # Build a voxel grid and compute the indicator function
         padding = 0.1
         bounds_min = points.min(axis=0) - padding
         bounds_max = points.max(axis=0) + padding
@@ -536,14 +867,12 @@ class MeshExtractor:
         dims = ((bounds_max - bounds_min) / cfg.voxel_size).astype(int)
         nx, ny, nz = int(dims[0]), int(dims[1]), int(dims[2])
 
-        # Splat points into voxel grid as a density field
         grid = np.zeros((nx, ny, nz), dtype=np.float32)
         voxel_idx = ((points - bounds_min) / cfg.voxel_size).astype(int)
         voxel_idx = np.clip(voxel_idx, 0, [nx - 1, ny - 1, nz - 1])
         for idx in voxel_idx:
             grid[idx[0], idx[1], idx[2]] += 1.0
 
-        # Smooth the density and extract isosurface
         from scipy.ndimage import gaussian_filter
         grid = gaussian_filter(grid, sigma=2.0)
         threshold = grid.max() * 0.1
@@ -561,7 +890,6 @@ class MeshExtractor:
             cleaner = MeshCleaner()
             return cleaner.clean(mesh, target_faces=target)
 
-        # Transfer colors via nearest-neighbor lookup
         vertex_colors = None
         if colors is not None:
             colors_f = colors.astype(np.float32)
@@ -570,8 +898,8 @@ class MeshExtractor:
             _, nn_idx = tree.query(verts, k=1)
             vc = colors_f[nn_idx]
             vc = np.clip(vc * 255, 0, 255).astype(np.uint8)
-            alpha = np.full((len(vc), 1), 255, dtype=np.uint8)
-            vertex_colors = np.hstack([vc, alpha])
+            alpha_col = np.full((len(vc), 1), 255, dtype=np.uint8)
+            vertex_colors = np.hstack([vc, alpha_col])
 
         mesh = trimesh.Trimesh(
             vertices=verts, faces=faces, vertex_normals=mesh_normals,

@@ -960,6 +960,61 @@ class PipelineStages:
                 "ply": ply_path, "vertex_count": vc, "method": method,
             }
 
+        # Strategy 0: gsplat depth rendering -> TSDF (preferred, GPU-accelerated)
+        try:
+            import torch
+            if torch.cuda.is_available():
+                from pipeline.mesh_extractor import MeshExtractor, TSDFConfig
+
+                extractor = MeshExtractor(config=TSDFConfig(
+                    target_faces=self.config.mesh.max_vertices // 2,
+                ))
+                mesh, color_images, cameras = extractor.extract_from_gsplat(
+                    ply_path,
+                    num_views=64,
+                    render_size=1024,
+                    target_faces=self.config.mesh.max_vertices // 2,
+                )
+                # gsplat returns mesh in world coordinates already, no rescale needed
+                mesh.export(str(mesh_glb_path))
+                mesh.export(str(mesh_obj_path))
+                vc = len(mesh.vertices)
+                logger.info("gsplat mesh for '%s': %d verts", label, vc)
+
+                # Bake texture from gsplat color renders
+                texture_path = obj_dir / f"{label}_diffuse.png"
+                try:
+                    from pipeline.texture_baker import TextureBaker, BakeConfig
+                    baker = TextureBaker(config=BakeConfig(texture_size=2048))
+                    # Convert cameras to numpy poses for the baker
+                    cam_poses = []
+                    for viewmat, K in cameras[:len(color_images)]:
+                        # Baker expects camera-to-world (inverse of viewmat)
+                        vm_np = viewmat.cpu().numpy()
+                        cam_to_world = np.linalg.inv(vm_np)
+                        cam_poses.append(cam_to_world)
+                    color_uint8 = [
+                        np.clip(img * 255, 0, 255).astype(np.uint8) for img in color_images
+                    ]
+                    textured_mesh, tex_path = baker.bake(
+                        mesh,
+                        output_texture_path=str(texture_path),
+                        color_images=color_uint8,
+                        camera_poses=cam_poses,
+                    )
+                    textured_mesh.export(str(mesh_glb_path))
+                    textured_mesh.export(str(mesh_obj_path))
+                    logger.info("Baked texture for '%s': %s", label, tex_path)
+                except Exception as tex_exc:
+                    logger.warning("Texture baking failed for '%s': %s", label, tex_exc)
+
+                return {
+                    "label": label, "mesh": str(mesh_glb_path), "mesh_obj": str(mesh_obj_path),
+                    "ply": ply_path, "vertex_count": vc, "method": "gsplat",
+                }
+        except Exception as exc:
+            logger.warning("gsplat meshing failed for '%s': %s", label, exc)
+
         # Strategy 1: Hunyuan3D
         if self.config.hunyuan3d.enabled:
             try:
