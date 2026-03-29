@@ -359,29 +359,16 @@ def setup() -> str:
 def _check_oauth_session() -> bool:
     """Check if Claude Code has an active OAuth session (subscription auth).
 
-    When the web interface runs as ubuntu user, the OAuth tokens in
-    ~/.claude/ are directly accessible.
+    Looks for .credentials.json in the ubuntu user's .claude directory.
+    This is fast (file check only, no subprocess).
     """
-    # Fast check: look for session files before running claude
-    claude_dir = Path.home() / ".claude"
-    if not claude_dir.exists():
-        return False
-    # Look for auth tokens (credentials.json or similar)
-    auth_files = list(claude_dir.glob("*auth*")) + list(claude_dir.glob("*token*")) + list(claude_dir.glob("*credential*"))
-    if not auth_files:
-        # Check the settings file for OAuth config
-        settings = claude_dir / "settings.json"
-        if not settings.exists():
-            return False
-    # Verify by running a quick test
-    try:
-        result = subprocess.run(
-            ["claude", "-p", "respond OK", "--max-turns", "1"],
-            capture_output=True, text=True, timeout=30,
-        )
-        return "OK" in result.stdout and result.returncode == 0
-    except Exception:
-        return False
+    for creds_path in [
+        Path("/home/ubuntu/.claude/.credentials.json"),
+        Path.home() / ".claude" / ".credentials.json",
+    ]:
+        if creds_path.exists() and creds_path.stat().st_size > 10:
+            return True
+    return False
 
 
 @app.route("/api/config", methods=["GET"])
