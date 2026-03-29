@@ -79,6 +79,24 @@ class InpaintConfig:
 
 
 @dataclass
+class Hunyuan3DConfig:
+    """Hunyuan3D 2.0 mesh reconstruction parameters."""
+    enabled: bool = True
+    comfyui_url: str = "http://192.168.2.48:8189"
+    api_url: str = "http://192.168.2.48:3001"
+    quality: str = "standard"
+    multiview: bool = True
+    turbo: bool = False
+    fallback_singleview: bool = True
+    fallback_sam3d: bool = True
+    timeout: int = 600
+    seed: int = 42
+    num_views: int = 4
+    render_size: int = 512
+    camera_distance: float = 2.5
+
+
+@dataclass
 class ExportConfig:
     """USD / final export parameters."""
     format: str = "usd"
@@ -124,6 +142,7 @@ class PipelineConfig:
     training: TrainingConfig = field(default_factory=TrainingConfig)
     decompose: DecomposeConfig = field(default_factory=DecomposeConfig)
     mesh: MeshConfig = field(default_factory=MeshConfig)
+    hunyuan3d: Hunyuan3DConfig = field(default_factory=Hunyuan3DConfig)
     inpaint: InpaintConfig = field(default_factory=InpaintConfig)
     export: ExportConfig = field(default_factory=ExportConfig)
     quality: QualityConfig = field(default_factory=QualityConfig)
@@ -159,6 +178,7 @@ class PipelineConfig:
             "training": TrainingConfig,
             "decompose": DecomposeConfig,
             "mesh": MeshConfig,
+            "hunyuan3d": Hunyuan3DConfig,
             "inpaint": InpaintConfig,
             "export": ExportConfig,
             "quality": QualityConfig,

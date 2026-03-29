@@ -1,0 +1,89 @@
+{
+  "1": {
+    "class_type": "ImageOnlyCheckpointLoader",
+    "inputs": {
+      "ckpt_name": "hunyuan3d-dit-v2.safetensors"
+    },
+    "_meta": {
+      "title": "Load Hunyuan3D Checkpoint"
+    }
+  },
+  "2": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "INPUT_IMAGE_PLACEHOLDER"
+    },
+    "_meta": {
+      "title": "Load Input Image"
+    }
+  },
+  "3": {
+    "class_type": "CLIPVisionEncode",
+    "inputs": {
+      "clip_vision": ["1", 2],
+      "image": ["2", 0]
+    },
+    "_meta": {
+      "title": "CLIP Vision Encode"
+    }
+  },
+  "4": {
+    "class_type": "Hunyuan3Dv2Conditioning",
+    "inputs": {
+      "clip_vision_output": ["3", 0]
+    },
+    "_meta": {
+      "title": "Hunyuan3D Conditioning"
+    }
+  },
+  "5": {
+    "class_type": "EmptyLatentHunyuan3Dv2",
+    "inputs": {
+      "resolution": 3072,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Empty Latent 3D"
+    }
+  },
+  "6": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["1", 0],
+      "positive": ["4", 0],
+      "negative": ["4", 1],
+      "latent_image": ["5", 0],
+      "seed": 42,
+      "steps": 50,
+      "cfg": 5.5,
+      "sampler_name": "euler",
+      "scheduler": "sgm_uniform",
+      "denoise": 1.0
+    },
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "7": {
+    "class_type": "VAEDecodeHunyuan3D",
+    "inputs": {
+      "samples": ["6", 0],
+      "vae": ["1", 1],
+      "num_chunks": 8000,
+      "octree_resolution": 256
+    },
+    "_meta": {
+      "title": "VAE Decode 3D"
+    }
+  },
+  "8": {
+    "class_type": "SaveGLB",
+    "inputs": {
+      "voxel": ["7", 0],
+      "filename_prefix": "hunyuan3d_output"
+    },
+    "_meta": {
+      "title": "Save GLB Mesh"
+    }
+  }
+}
