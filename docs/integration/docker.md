@@ -82,6 +82,7 @@ The 3DGS stack knowledge is stored in the external RuVector PostgreSQL memory:
 
 - **Project**: `gaussians` (ID 100)
 - **Namespace**: `gaussians`
-- **Entries**: 13 memory entries (tools, APIs, CLIs, workflows, build info)
+- **Entries**: 11 memory entries with 384-dim embeddings (tools, APIs, CLIs, workflows, build info)
 - **Patterns**: 10 (5 workflow, 2 build, 3 troubleshooting)
 - **Knowledge Graph**: 13 nodes, 17 edges in the `gaussians` graph
+- **IMPORTANT**: Always use `mcp__claude-flow__memory_store` — never raw SQL INSERT. Raw SQL bypasses the embedding pipeline and entries become invisible to HNSW semantic search.
