@@ -49,6 +49,8 @@ services:
       - models-data:/opt/models
       # HuggingFace cache
       - hf-cache:/root/.cache/huggingface
+      # Claude Code OAuth session (survives container recreation)
+      - claude-session:/home/ubuntu/.claude
 
     restart: unless-stopped
 
@@ -63,4 +65,6 @@ volumes:
   models-data:
     driver: local
   hf-cache:
+    driver: local
+  claude-session:
     driver: local
