@@ -1,0 +1,49 @@
+{
+  "1": {
+    "class_type": "LoadImageBase64",
+    "inputs": {
+      "image": ""
+    }
+  },
+  "2": {
+    "class_type": "RTDETR_detect",
+    "inputs": {
+      "model": "rtdetr_r50vd_6x_coco_o365",
+      "image": ["1", 0],
+      "threshold": 0.5,
+      "class_name": "person",
+      "max_detections": 20
+    }
+  },
+  "3": {
+    "class_type": "GrowMask",
+    "inputs": {
+      "mask": ["2", 1],
+      "expand": 15,
+      "tapered_corners": true
+    }
+  },
+  "4": {
+    "class_type": "InvertMask",
+    "inputs": {
+      "mask": ["3", 0]
+    }
+  },
+  "5": {
+    "class_type": "RecraftImageInpaintingNode",
+    "inputs": {
+      "image": ["1", 0],
+      "mask": ["3", 0],
+      "prompt": "empty gallery room, clean floor and walls, photorealistic interior",
+      "n": 1,
+      "seed": 42,
+      "negative_prompt": "person, people, human, figure, shadow of person"
+    }
+  },
+  "6": {
+    "class_type": "PreviewImage",
+    "inputs": {
+      "images": ["5", 0]
+    }
+  }
+}

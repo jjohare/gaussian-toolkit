@@ -39,6 +39,7 @@ class PipelineState(Enum):
     """All possible pipeline states, ordered."""
     IDLE = "IDLE"
     INGEST = "INGEST"
+    REMOVE_PEOPLE = "REMOVE_PEOPLE"
     RECONSTRUCT = "RECONSTRUCT"
     QUALITY_GATE_1 = "QUALITY_GATE_1"
     DECOMPOSE = "DECOMPOSE"
@@ -56,7 +57,8 @@ class PipelineState(Enum):
 # Ordered transitions: each state's successor on success.
 _TRANSITIONS: dict[PipelineState, PipelineState] = {
     PipelineState.IDLE: PipelineState.INGEST,
-    PipelineState.INGEST: PipelineState.RECONSTRUCT,
+    PipelineState.INGEST: PipelineState.REMOVE_PEOPLE,
+    PipelineState.REMOVE_PEOPLE: PipelineState.RECONSTRUCT,
     PipelineState.RECONSTRUCT: PipelineState.QUALITY_GATE_1,
     PipelineState.QUALITY_GATE_1: PipelineState.DECOMPOSE,
     PipelineState.DECOMPOSE: PipelineState.EXTRACT_OBJECTS,
@@ -200,6 +202,7 @@ class PipelineOrchestrator:
     def _get_handler(self, state: PipelineState):
         handlers = {
             PipelineState.INGEST: self._run_ingest,
+            PipelineState.REMOVE_PEOPLE: self._run_remove_people,
             PipelineState.RECONSTRUCT: self._run_reconstruct,
             PipelineState.QUALITY_GATE_1: self._run_quality_gate_1,
             PipelineState.DECOMPOSE: self._run_decompose,
@@ -373,6 +376,83 @@ class PipelineOrchestrator:
             metrics=quality.metrics,
             artifacts={"frames_dir": str(frame_dir), "frame_count": str(len(frames))},
             quality=quality,
+        )
+
+    def _run_remove_people(self) -> StageResult:
+        """Detect and remove people from frames before COLMAP processing."""
+        if self._frame_dir is None:
+            return StageResult(
+                success=False, state=self._state,
+                error="No frames directory from ingest stage",
+            )
+
+        cfg = self.config.person_removal
+        if not cfg.enabled:
+            logger.info("Person removal disabled, skipping")
+            return StageResult(
+                success=True, state=self._state,
+                metrics={"skipped": True},
+                artifacts={"cleaned_frames_dir": str(self._frame_dir)},
+            )
+
+        from pipeline.person_remover import PersonRemover
+
+        cleaned_dir = self.output_dir / "frames_cleaned"
+        remover = PersonRemover(
+            method=cfg.method,
+            comfyui_url=cfg.comfyui_url or None,
+            flux_endpoint=cfg.flux_endpoint or None,
+            confidence=cfg.confidence,
+            dilation_px=cfg.dilation_px,
+            drop_threshold=cfg.drop_threshold,
+            flag_threshold=cfg.flag_threshold,
+            comfyui_timeout=cfg.comfyui_timeout,
+        )
+
+        try:
+            manifest = remover.process_directory(
+                str(self._frame_dir), str(cleaned_dir),
+            )
+        except Exception as exc:
+            return StageResult(
+                success=False, state=self._state,
+                error=f"Person removal failed: {exc}",
+            )
+
+        summary = manifest.get("summary", {})
+        remaining = summary.get("clean", 0) + summary.get("inpainted", 0) + summary.get("flagged_inpainted", 0)
+
+        if remaining < self.config.ingest.min_frames:
+            return StageResult(
+                success=False, state=self._state,
+                error=(
+                    f"Too few frames after person removal: {remaining} "
+                    f"(need {self.config.ingest.min_frames}). "
+                    f"{summary.get('dropped', 0)} frames were dropped."
+                ),
+                metrics=manifest.get("summary", {}),
+            )
+
+        # Point subsequent stages at the cleaned frames
+        self._frame_dir = cleaned_dir
+        self._artifacts["cleaned_frames_dir"] = str(cleaned_dir)
+        self._artifacts["person_removal_manifest"] = str(
+            cleaned_dir / "person_removal_manifest.json"
+        )
+
+        return StageResult(
+            success=True, state=self._state,
+            metrics={
+                "total_frames": manifest.get("total_frames", 0),
+                "remaining_frames": remaining,
+                **summary,
+            },
+            artifacts={
+                "cleaned_frames_dir": str(cleaned_dir),
+                "person_removal_manifest": str(
+                    cleaned_dir / "person_removal_manifest.json"
+                ),
+            },
         )
 
     def _run_reconstruct(self) -> StageResult:

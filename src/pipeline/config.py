@@ -104,6 +104,20 @@ class Hunyuan3DConfig:
 
 
 @dataclass
+class PersonRemovalConfig:
+    """Person detection and removal parameters."""
+    enabled: bool = True
+    method: str = "opencv"
+    comfyui_url: str = "http://192.168.2.48:8188"
+    flux_endpoint: str = ""
+    confidence: float = 0.5
+    dilation_px: int = 15
+    drop_threshold: float = 0.30
+    flag_threshold: float = 0.05
+    comfyui_timeout: float = 120.0
+
+
+@dataclass
 class ExportConfig:
     """USD / final export parameters."""
     format: str = "usd"
@@ -145,6 +159,7 @@ class PipelineConfig:
     output_dir: str = "./output"
 
     ingest: IngestConfig = field(default_factory=IngestConfig)
+    person_removal: PersonRemovalConfig = field(default_factory=PersonRemovalConfig)
     reconstruct: ReconstructConfig = field(default_factory=ReconstructConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     decompose: DecomposeConfig = field(default_factory=DecomposeConfig)
@@ -181,6 +196,7 @@ class PipelineConfig:
 
         sub_map: dict[str, type] = {
             "ingest": IngestConfig,
+            "person_removal": PersonRemovalConfig,
             "reconstruct": ReconstructConfig,
             "training": TrainingConfig,
             "decompose": DecomposeConfig,
