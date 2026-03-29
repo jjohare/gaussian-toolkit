@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         autoconf autoconf-archive automake libtool pkg-config \
         libeigen3-dev libceres-dev libsuitesparse-dev libcgal-dev \
         libgoogle-glog-dev libglew-dev libsqlite3-dev \
-        libboost-all-dev libflann-dev libfreeimage-dev \
+        libboost-all-dev libflann-dev libfreeimage-dev libopenimageio-dev \
         x11vnc xvfb fluxbox \
         supervisor nginx \
         jq zip unzip \
