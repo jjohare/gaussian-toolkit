@@ -168,9 +168,25 @@ RUN pip3 install --break-system-packages --ignore-installed \
         "sam3 @ git+https://github.com/facebookresearch/sam3.git" \
         || echo "SAM3 pip install skipped — text-prompted segmentation unavailable"
 
-# USD requires python3.11 — isolated venv
-RUN python3.11 -m venv /opt/venv-usd && \
+# USD requires python3.11 — isolated venv (PYTHONPATH="" needed at runtime)
+RUN python3.11 -m venv --without-pip /opt/venv-usd && \
+    curl -sS https://bootstrap.pypa.io/get-pip.py | /opt/venv-usd/bin/python3 && \
     /opt/venv-usd/bin/pip install usd-core numpy trimesh
+
+# Install SplatReady plugin for LichtFeld
+RUN git clone https://github.com/jacobvanbeets/SplatReady.git \
+        /root/.lichtfeld/plugins/splat_ready && \
+    printf '{"reconstruction_method":"colmap","colmap_exe_path":"/usr/local/bin/colmap","frame_rate":1.0,"max_image_size":2000,"min_scale":0.5}\n' \
+        > /root/.lichtfeld/plugins/splat_ready/pipeline_config.json
+
+# Install ttyd web terminal for Claude Code access
+RUN curl -fsSL https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 \
+        -o /usr/local/bin/ttyd && chmod +x /usr/local/bin/ttyd
+
+# SAM3 from official repo (pip package is broken, need repo install)
+RUN git clone --depth 1 https://github.com/facebookresearch/sam3.git /opt/sam3-repo && \
+    cd /opt/sam3-repo && pip3 install --break-system-packages -e . || \
+    echo "SAM3 repo install failed — text-prompted segmentation unavailable"
 
 # ---------------------------------------------------------------------------
 # PHASE 9: Pipeline code from gaussian-toolkit repo

@@ -47,5 +47,17 @@ x11vnc -display :1 -forever -nopw -shared -rfbport 5901 -bg 2>/dev/null || true
 
 echo "VNC on port 5901"
 
+# Ensure data directories exist
+mkdir -p /data/output /data/input
+
+# Create usd-assemble wrapper that uses the correct venv
+cat > /usr/local/bin/usd-assemble << 'USDEOF'
+#!/bin/bash
+PYTHONPATH="" exec /opt/venv-usd/bin/python3 /opt/gaussian-toolkit/scripts/assemble_usd_scene.py "$@"
+USDEOF
+chmod +x /usr/local/bin/usd-assemble
+
+echo "Services starting via supervisord..."
+
 # Start supervisord
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/gaussian-toolkit.conf
