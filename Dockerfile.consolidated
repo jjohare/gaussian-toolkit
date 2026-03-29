@@ -1,0 +1,465 @@
+# =============================================================================
+# LichtFeld Studio / Gaussian Toolkit — Consolidated Dockerfile
+# Target: Dual RTX 6000 Ada (2x48GB VRAM), 251GB RAM, Threadripper PRO 48-core
+# Base: CUDA 12.8.1 devel on Ubuntu 24.04
+# =============================================================================
+
+FROM nvidia/cuda:12.8.1-devel-ubuntu24.04 AS base
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG MAKEFLAGS="-j$(nproc)"
+
+# ---------------------------------------------------------------------------
+# PHASE 1: System packages
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake ninja-build nasm git curl wget ffmpeg imagemagick \
+        python3.11 python3.11-venv python3.11-dev \
+        python3.12 python3.12-venv python3.12-dev python3-pip \
+        libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+        autoconf autoconf-archive automake libtool pkg-config \
+        libeigen3-dev libceres-dev libsuitesparse-dev libcgal-dev \
+        libgoogle-glog-dev libglew-dev libsqlite3-dev \
+        libboost-all-dev libflann-dev libfreeimage-dev \
+        x11vnc xvfb fluxbox \
+        supervisor nginx \
+        jq zip unzip ca-certificates gnupg lsb-release \
+        software-properties-common \
+    && rm -rf /var/lib/apt/lists/*
+
+# Make python3.12 the default python3
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
+
+# ---------------------------------------------------------------------------
+# PHASE 2: Node.js 23 (for Claude Code tooling)
+# ---------------------------------------------------------------------------
+RUN curl -fsSL https://nodejs.org/dist/v23.11.1/node-v23.11.1-linux-x64.tar.xz \
+        | tar -xJ -C /usr/local --strip-components=1 \
+    && npm install -g @anthropic-ai/claude-code
+
+# ---------------------------------------------------------------------------
+# PHASE 3: METIS + GKlib from source (required by COLMAP via Ceres/SuiteSparse)
+# ---------------------------------------------------------------------------
+RUN cd /tmp && \
+    curl -sL https://github.com/KarypisLab/METIS/archive/refs/tags/v5.2.1.tar.gz | tar xz && \
+    cd METIS-5.2.1 && \
+    git clone --depth 1 https://github.com/KarypisLab/GKlib.git && \
+    # Build GKlib static
+    mkdir -p GKlib/build && cd GKlib/build && \
+    cmake .. -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-fPIC" -DBUILD_SHARED_LIBS=OFF && \
+    make -j$(nproc) GKlib && make install && \
+    # Build METIS static
+    cd /tmp/METIS-5.2.1 && \
+    mkdir -p build/xinclude && \
+    echo "#define IDXTYPEWIDTH 32" > build/xinclude/metis.h && \
+    echo "#define REALTYPEWIDTH 32" >> build/xinclude/metis.h && \
+    cat include/metis.h >> build/xinclude/metis.h && \
+    cp include/CMakeLists.txt build/xinclude && \
+    cd build && \
+    cmake /tmp/METIS-5.2.1 -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+        -DGKLIB_PATH=/tmp/METIS-5.2.1/GKlib -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-fPIC" && \
+    make -j$(nproc) metis && \
+    cp libmetis/libmetis.a /usr/local/lib/ && \
+    cp /tmp/METIS-5.2.1/build/xinclude/metis.h /usr/local/include/ && \
+    # Create METIS cmake config
+    mkdir -p /usr/local/lib/cmake/metis && \
+    printf 'if(NOT TARGET METIS::METIS)\n\
+  add_library(METIS::METIS STATIC IMPORTED)\n\
+  set_target_properties(METIS::METIS PROPERTIES\n\
+    IMPORTED_LOCATION "/usr/local/lib/libmetis.a"\n\
+    INTERFACE_INCLUDE_DIRECTORIES "/usr/local/include"\n\
+    INTERFACE_LINK_LIBRARIES "/usr/local/lib/libGKlib.a;m")\n\
+endif()\n\
+set(METIS_FOUND TRUE)\n' > /usr/local/lib/cmake/metis/metis-config.cmake && \
+    ldconfig && \
+    rm -rf /tmp/METIS-5.2.1
+
+# ---------------------------------------------------------------------------
+# PHASE 4: COLMAP from source (headless, CUDA sm_89 for Ada GPUs)
+# ---------------------------------------------------------------------------
+RUN git clone --depth 1 https://github.com/colmap/colmap.git /tmp/colmap && \
+    cmake -B /tmp/colmap/build -S /tmp/colmap \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_CUDA_ARCHITECTURES="89" \
+        -DGUI_ENABLED=OFF \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_PREFIX_PATH=/usr/local \
+        -G Ninja && \
+    cmake --build /tmp/colmap/build -- -j$(nproc) && \
+    cmake --install /tmp/colmap/build && \
+    rm -rf /tmp/colmap
+
+# ---------------------------------------------------------------------------
+# PHASE 5: vcpkg + LichtFeld Studio from source
+# ---------------------------------------------------------------------------
+RUN git clone https://github.com/microsoft/vcpkg.git /opt/vcpkg && \
+    /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+ENV VCPKG_ROOT=/opt/vcpkg
+ENV PATH="/opt/vcpkg:${PATH}"
+
+RUN git clone --recursive https://github.com/jjohare/gaussian-toolkit.git /opt/gaussian-toolkit && \
+    cd /opt/gaussian-toolkit && \
+    git checkout gaussian-toolkit && \
+    cmake -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
+        -DCMAKE_CUDA_ARCHITECTURES="89" \
+        -G Ninja && \
+    cmake --build build -- -j$(nproc) || true
+    # Binary links even if stubgen fails — vcpkg USD python bindings
+    # may fail on stubgen but the core library is still usable
+
+# ---------------------------------------------------------------------------
+# PHASE 6: Blender 5.0.1
+# ---------------------------------------------------------------------------
+RUN mkdir -p /opt/blender && \
+    curl -fsSL https://download.blender.org/release/Blender5.0/blender-5.0.1-linux-x64.tar.xz \
+        | tar -xJ -C /opt/blender --strip-components=1 && \
+    ln -sf /opt/blender/blender /usr/local/bin/blender
+
+# ---------------------------------------------------------------------------
+# PHASE 7: ComfyUI
+# ---------------------------------------------------------------------------
+RUN git clone https://github.com/comfyanonymous/ComfyUI.git /opt/comfyui && \
+    cd /opt/comfyui && \
+    pip3 install --break-system-packages -r requirements.txt && \
+    pip3 install --break-system-packages \
+        torch torchvision torchaudio \
+        --index-url https://download.pytorch.org/whl/cu128
+
+# ComfyUI custom nodes
+RUN cd /opt/comfyui/custom_nodes && \
+    git clone https://github.com/ltdrdata/ComfyUI-Manager.git && \
+    git clone https://github.com/peteromallet/comfyui-sam3dobjects.git && \
+    # Hunyuan3D v2 ComfyUI integration
+    git clone https://github.com/tencent/Hunyuan3D-2.git hunyuan3d-2 || true
+
+# ---------------------------------------------------------------------------
+# PHASE 8: Python pipeline dependencies
+# ---------------------------------------------------------------------------
+RUN pip3 install --break-system-packages \
+        sam2 segment-anything trimesh xatlas pymeshfix fast-simplification scikit-image \
+        pillow piexif av yt-dlp huggingface_hub requests aiohttp flask \
+        open3d plyfile numpy scipy opencv-python-headless
+
+# USD requires python3.11 — isolated venv
+RUN python3.11 -m venv /opt/venv-usd && \
+    /opt/venv-usd/bin/pip install usd-core numpy trimesh
+
+# ---------------------------------------------------------------------------
+# PHASE 9: Pipeline code from gaussian-toolkit repo
+# ---------------------------------------------------------------------------
+# Already cloned in Phase 5; create convenient symlinks
+RUN ln -sf /opt/gaussian-toolkit/src/pipeline /opt/pipeline && \
+    ln -sf /opt/gaussian-toolkit/scripts /opt/scripts && \
+    ln -sf /opt/gaussian-toolkit/research /opt/research
+
+# ---------------------------------------------------------------------------
+# PHASE 10: Minimal Flask web interface (placeholder for web-interface agent)
+# ---------------------------------------------------------------------------
+RUN mkdir -p /opt/web-interface/templates
+
+COPY <<'FLASK_APP' /opt/web-interface/app.py
+import os
+import json
+import subprocess
+from flask import Flask, render_template, request, jsonify, send_from_directory
+
+app = Flask(__name__)
+
+MODELS_DIR = "/opt/models"
+OUTPUT_DIR = "/opt/output"
+PIPELINE_DIR = "/opt/gaussian-toolkit/src/pipeline"
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+@app.route("/api/health")
+def health():
+    gpu_info = "unavailable"
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.used,memory.total", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=5
+        )
+        gpu_info = result.stdout.strip()
+    except Exception:
+        pass
+    return jsonify({
+        "status": "ok",
+        "gpus": gpu_info,
+        "comfyui": os.path.exists("/opt/comfyui/main.py"),
+        "colmap": os.path.exists("/usr/local/bin/colmap"),
+        "blender": os.path.exists("/usr/local/bin/blender"),
+    })
+
+@app.route("/api/models")
+def list_models():
+    models = {}
+    for subdir in os.listdir(MODELS_DIR):
+        path = os.path.join(MODELS_DIR, subdir)
+        if os.path.isdir(path):
+            models[subdir] = os.listdir(path)
+    return jsonify(models)
+
+@app.route("/api/outputs")
+def list_outputs():
+    outputs = []
+    for root, dirs, files in os.walk(OUTPUT_DIR):
+        for f in files:
+            rel = os.path.relpath(os.path.join(root, f), OUTPUT_DIR)
+            outputs.append(rel)
+    return jsonify(outputs)
+
+@app.route("/api/outputs/<path:filename>")
+def serve_output(filename):
+    return send_from_directory(OUTPUT_DIR, filename)
+
+@app.route("/api/run", methods=["POST"])
+def run_pipeline():
+    data = request.get_json() or {}
+    cmd = data.get("command", "")
+    if not cmd:
+        return jsonify({"error": "No command specified"}), 400
+    try:
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, timeout=3600,
+            cwd=PIPELINE_DIR
+        )
+        return jsonify({
+            "returncode": result.returncode,
+            "stdout": result.stdout[-10000:],
+            "stderr": result.stderr[-5000:],
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Command timed out after 3600s"}), 504
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=7860, debug=False)
+FLASK_APP
+
+COPY <<'INDEX_HTML' /opt/web-interface/templates/index.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LichtFeld Studio - Gaussian Toolkit</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; }
+        .header { background: #1a1a2e; padding: 1rem 2rem; border-bottom: 1px solid #333; }
+        .header h1 { font-size: 1.5rem; color: #00d4ff; }
+        .container { max-width: 1200px; margin: 2rem auto; padding: 0 2rem; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; }
+        .card { background: #1a1a2e; border: 1px solid #333; border-radius: 8px; padding: 1.5rem; }
+        .card h2 { color: #00d4ff; margin-bottom: 1rem; font-size: 1.1rem; }
+        .status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .status.ok { background: #00ff88; }
+        .status.err { background: #ff4444; }
+        pre { background: #0d0d1a; padding: 1rem; border-radius: 4px; overflow-x: auto; font-size: 0.85rem; color: #aaa; margin-top: 0.5rem; }
+        button { background: #00d4ff; color: #000; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-weight: 600; }
+        button:hover { background: #00b8e0; }
+        #outputs-list { max-height: 300px; overflow-y: auto; }
+        .output-item { padding: 0.3rem 0; border-bottom: 1px solid #222; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+    <div class="header"><h1>LichtFeld Studio / Gaussian Toolkit Pipeline</h1></div>
+    <div class="container">
+        <div class="grid">
+            <div class="card">
+                <h2>System Health</h2>
+                <div id="health">Loading...</div>
+            </div>
+            <div class="card">
+                <h2>Models</h2>
+                <div id="models">Loading...</div>
+            </div>
+            <div class="card">
+                <h2>Outputs</h2>
+                <div id="outputs-list">Loading...</div>
+            </div>
+        </div>
+    </div>
+    <script>
+        async function loadHealth() {
+            try {
+                const r = await fetch('/api/health');
+                const d = await r.json();
+                const el = document.getElementById('health');
+                el.innerHTML = `
+                    <p><span class="status ${d.status==='ok'?'ok':'err'}"></span>Pipeline: ${d.status}</p>
+                    <p><span class="status ${d.colmap?'ok':'err'}"></span>COLMAP: ${d.colmap?'installed':'missing'}</p>
+                    <p><span class="status ${d.blender?'ok':'err'}"></span>Blender: ${d.blender?'installed':'missing'}</p>
+                    <p><span class="status ${d.comfyui?'ok':'err'}"></span>ComfyUI: ${d.comfyui?'installed':'missing'}</p>
+                    <pre>${d.gpus}</pre>`;
+            } catch(e) { document.getElementById('health').textContent = 'Error: ' + e; }
+        }
+        async function loadModels() {
+            try {
+                const r = await fetch('/api/models');
+                const d = await r.json();
+                const el = document.getElementById('models');
+                el.innerHTML = Object.entries(d).map(([k,v]) =>
+                    `<p><strong>${k}</strong>: ${v.length} file(s)</p>`
+                ).join('') || '<p>No models found</p>';
+            } catch(e) { document.getElementById('models').textContent = 'Error: ' + e; }
+        }
+        async function loadOutputs() {
+            try {
+                const r = await fetch('/api/outputs');
+                const d = await r.json();
+                const el = document.getElementById('outputs-list');
+                el.innerHTML = d.map(f => `<div class="output-item">${f}</div>`).join('') || '<p>No outputs yet</p>';
+            } catch(e) { document.getElementById('outputs-list').textContent = 'Error: ' + e; }
+        }
+        loadHealth(); loadModels(); loadOutputs();
+        setInterval(loadHealth, 30000);
+    </script>
+</body>
+</html>
+INDEX_HTML
+
+# ---------------------------------------------------------------------------
+# PHASE 11: Model directory structure
+# ---------------------------------------------------------------------------
+RUN mkdir -p /opt/models/diffusion_models \
+             /opt/models/text_encoders \
+             /opt/models/vae \
+             /opt/models/loras \
+             /opt/models/trellis2 \
+             /opt/models/sam3d \
+             /opt/models/sam2 \
+             /opt/models/grounding-dino \
+             /opt/models/sams \
+             /opt/models/hunyuan3d \
+    && mkdir -p /opt/output \
+    && mkdir -p /models-staging
+
+# ---------------------------------------------------------------------------
+# PHASE 12: VNC + supervisord configuration
+# ---------------------------------------------------------------------------
+RUN mkdir -p /var/log/supervisor /var/run/supervisor /root/.fluxbox
+
+COPY <<'SUPERVISORD_CONF' /etc/supervisor/conf.d/gaussian-toolkit.conf
+[supervisord]
+nodaemon=true
+logfile=/var/log/supervisor/supervisord.log
+pidfile=/var/run/supervisor/supervisord.pid
+childlogdir=/var/log/supervisor
+
+[program:xvfb]
+command=/usr/bin/Xvfb :1 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset
+autorestart=true
+priority=10
+stdout_logfile=/var/log/supervisor/xvfb.log
+stderr_logfile=/var/log/supervisor/xvfb-err.log
+
+[program:fluxbox]
+command=/usr/bin/fluxbox
+environment=DISPLAY=":1"
+autorestart=true
+priority=20
+depends_on=xvfb
+stdout_logfile=/var/log/supervisor/fluxbox.log
+stderr_logfile=/var/log/supervisor/fluxbox-err.log
+
+[program:x11vnc]
+command=/usr/bin/x11vnc -display :1 -forever -shared -nopw -rfbport 5901
+autorestart=true
+priority=30
+depends_on=xvfb
+stdout_logfile=/var/log/supervisor/x11vnc.log
+stderr_logfile=/var/log/supervisor/x11vnc-err.log
+
+[program:comfyui]
+command=python3 /opt/comfyui/main.py --listen 0.0.0.0 --port 8188 --cuda-device 1 --preview-method auto
+directory=/opt/comfyui
+environment=DISPLAY=":1",CUDA_VISIBLE_DEVICES="1"
+autorestart=true
+priority=40
+startretries=5
+startsecs=10
+stdout_logfile=/var/log/supervisor/comfyui.log
+stderr_logfile=/var/log/supervisor/comfyui-err.log
+
+[program:web-interface]
+command=python3 /opt/web-interface/app.py
+directory=/opt/web-interface
+autorestart=true
+priority=50
+stdout_logfile=/var/log/supervisor/web-interface.log
+stderr_logfile=/var/log/supervisor/web-interface-err.log
+SUPERVISORD_CONF
+
+# ---------------------------------------------------------------------------
+# PHASE 13: Entrypoint
+# ---------------------------------------------------------------------------
+COPY <<'ENTRYPOINT_SH' /opt/entrypoint.sh
+#!/bin/bash
+set -e
+
+echo "============================================"
+echo " LichtFeld Studio / Gaussian Toolkit"
+echo " Starting up..."
+echo "============================================"
+
+# ---- Step 1: Copy models from staging on first run ----
+MARKER="/opt/models/.initialized"
+if [ ! -f "$MARKER" ] && [ -d "/models-staging" ] && [ "$(ls -A /models-staging 2>/dev/null)" ]; then
+    echo "[init] Copying models from /models-staging to /opt/models ..."
+    cp -rn /models-staging/* /opt/models/ 2>/dev/null || true
+    touch "$MARKER"
+    echo "[init] Model staging complete."
+else
+    echo "[init] Models already initialized or no staging data."
+fi
+
+# ---- Step 2: Create ComfyUI model symlinks ----
+if [ -d "/opt/comfyui/models" ]; then
+    for subdir in diffusion_models text_encoders vae loras; do
+        if [ -d "/opt/models/$subdir" ] && [ ! -L "/opt/comfyui/models/$subdir" ]; then
+            rm -rf "/opt/comfyui/models/$subdir" 2>/dev/null || true
+            ln -sf "/opt/models/$subdir" "/opt/comfyui/models/$subdir"
+        fi
+    done
+    echo "[init] ComfyUI model symlinks configured."
+fi
+
+# ---- Step 3: Start supervisord ----
+echo "[init] Starting supervisord ..."
+exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
+ENTRYPOINT_SH
+
+RUN chmod +x /opt/entrypoint.sh
+
+# ---------------------------------------------------------------------------
+# Environment variables
+# ---------------------------------------------------------------------------
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
+ENV CUDA_HOME=/usr/local/cuda
+ENV DISPLAY=:1
+ENV PATH="/opt/gaussian-toolkit/build:/opt/venv-usd/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/lib:${LD_LIBRARY_PATH}"
+ENV VCPKG_ROOT=/opt/vcpkg
+
+# ---------------------------------------------------------------------------
+# Exposed ports
+# ---------------------------------------------------------------------------
+# 7860  = Web interface (Flask)
+# 8188  = ComfyUI
+# 45677 = LichtFeld Studio (if applicable)
+# 5901  = VNC
+EXPOSE 7860 8188 45677 5901
+
+WORKDIR /opt/gaussian-toolkit
+
+ENTRYPOINT ["/opt/entrypoint.sh"]
