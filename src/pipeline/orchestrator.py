@@ -40,11 +40,13 @@ class PipelineState(Enum):
     IDLE = "IDLE"
     INGEST = "INGEST"
     REMOVE_PEOPLE = "REMOVE_PEOPLE"
+    SELECT_FRAMES = "SELECT_FRAMES"
     RECONSTRUCT = "RECONSTRUCT"
     QUALITY_GATE_1 = "QUALITY_GATE_1"
     DECOMPOSE = "DECOMPOSE"
     EXTRACT_OBJECTS = "EXTRACT_OBJECTS"
     MESH_OBJECTS = "MESH_OBJECTS"
+    TEXTURE_BAKE = "TEXTURE_BAKE"
     QUALITY_GATE_2 = "QUALITY_GATE_2"
     INPAINT_BG = "INPAINT_BG"
     RETRAIN_BG = "RETRAIN_BG"
@@ -58,12 +60,14 @@ class PipelineState(Enum):
 _TRANSITIONS: dict[PipelineState, PipelineState] = {
     PipelineState.IDLE: PipelineState.INGEST,
     PipelineState.INGEST: PipelineState.REMOVE_PEOPLE,
-    PipelineState.REMOVE_PEOPLE: PipelineState.RECONSTRUCT,
+    PipelineState.REMOVE_PEOPLE: PipelineState.SELECT_FRAMES,
+    PipelineState.SELECT_FRAMES: PipelineState.RECONSTRUCT,
     PipelineState.RECONSTRUCT: PipelineState.QUALITY_GATE_1,
     PipelineState.QUALITY_GATE_1: PipelineState.DECOMPOSE,
     PipelineState.DECOMPOSE: PipelineState.EXTRACT_OBJECTS,
     PipelineState.EXTRACT_OBJECTS: PipelineState.MESH_OBJECTS,
-    PipelineState.MESH_OBJECTS: PipelineState.QUALITY_GATE_2,
+    PipelineState.MESH_OBJECTS: PipelineState.TEXTURE_BAKE,
+    PipelineState.TEXTURE_BAKE: PipelineState.QUALITY_GATE_2,
     PipelineState.QUALITY_GATE_2: PipelineState.INPAINT_BG,
     PipelineState.INPAINT_BG: PipelineState.RETRAIN_BG,
     PipelineState.RETRAIN_BG: PipelineState.USD_ASSEMBLE,
@@ -136,6 +140,7 @@ class PipelineOrchestrator:
         self._training_metrics: TrainingMetrics | None = None
         self._extracted_objects: list[dict[str, Any]] = []
         self._mesh_results: list[dict[str, Any]] = []
+        self._person_manifest: dict[str, Any] | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -203,11 +208,13 @@ class PipelineOrchestrator:
         handlers = {
             PipelineState.INGEST: self._run_ingest,
             PipelineState.REMOVE_PEOPLE: self._run_remove_people,
+            PipelineState.SELECT_FRAMES: self._run_select_frames,
             PipelineState.RECONSTRUCT: self._run_reconstruct,
             PipelineState.QUALITY_GATE_1: self._run_quality_gate_1,
             PipelineState.DECOMPOSE: self._run_decompose,
             PipelineState.EXTRACT_OBJECTS: self._run_extract_objects,
             PipelineState.MESH_OBJECTS: self._run_mesh_objects,
+            PipelineState.TEXTURE_BAKE: self._run_texture_bake,
             PipelineState.QUALITY_GATE_2: self._run_quality_gate_2,
             PipelineState.INPAINT_BG: self._run_inpaint_bg,
             PipelineState.RETRAIN_BG: self._run_retrain_bg,
@@ -433,6 +440,9 @@ class PipelineOrchestrator:
                 metrics=manifest.get("summary", {}),
             )
 
+        # Store manifest for frame selection stage
+        self._person_manifest = manifest
+
         # Point subsequent stages at the cleaned frames
         self._frame_dir = cleaned_dir
         self._artifacts["cleaned_frames_dir"] = str(cleaned_dir)
@@ -453,6 +463,71 @@ class PipelineOrchestrator:
                     cleaned_dir / "person_removal_manifest.json"
                 ),
             },
+        )
+
+    def _run_select_frames(self) -> StageResult:
+        """Score, filter, and select the best frame subset for COLMAP."""
+        if self._frame_dir is None:
+            return StageResult(
+                success=False, state=self._state,
+                error="No frames directory from previous stage",
+            )
+
+        from pipeline.frame_selector import FrameSelector, SelectionConfig
+
+        sel_cfg = SelectionConfig(
+            target_frames=min(
+                self.config.ingest.max_frames,
+                max(self.config.ingest.min_frames, 150),
+            ),
+            min_frames=self.config.ingest.min_frames,
+            max_frames=self.config.ingest.max_frames,
+            blur_threshold=self.config.ingest.blur_threshold,
+        )
+        selector = FrameSelector(config=sel_cfg)
+
+        try:
+            scores = selector.score_frames(str(self._frame_dir))
+        except Exception as exc:
+            logger.warning("Frame scoring failed (%s), keeping all frames", exc)
+            return StageResult(
+                success=True, state=self._state,
+                metrics={"skipped": True, "reason": str(exc)},
+                artifacts={"selected_frames_dir": str(self._frame_dir)},
+            )
+
+        if not scores:
+            return StageResult(
+                success=False, state=self._state,
+                error=f"No frames found in {self._frame_dir}",
+            )
+
+        selected = selector.select(scores, person_manifest=self._person_manifest)
+
+        if len(selected) < self.config.ingest.min_frames:
+            return StageResult(
+                success=False, state=self._state,
+                error=(
+                    f"Only {len(selected)} frames after selection "
+                    f"(need {self.config.ingest.min_frames})"
+                ),
+                metrics={"scored": len(scores), "selected": len(selected)},
+            )
+
+        selected_dir = self.output_dir / "frames_selected"
+        selected_paths = selector.copy_selected(selected, str(selected_dir))
+
+        # Update frame_dir for downstream stages
+        self._frame_dir = selected_dir
+
+        return StageResult(
+            success=True, state=self._state,
+            metrics={
+                "scored": len(scores),
+                "selected": len(selected),
+                "target": sel_cfg.target_frames,
+            },
+            artifacts={"selected_frames_dir": str(selected_dir)},
         )
 
     def _run_reconstruct(self) -> StageResult:
@@ -841,43 +916,38 @@ class PipelineOrchestrator:
         )
 
     def _run_mesh_objects(self) -> StageResult:
-        """Convert each extracted PLY to a mesh via plugin or Poisson."""
-        meshes_dir = self.output_dir / "meshes"
+        """Convert each extracted PLY to a mesh.
+
+        Extraction priority per object:
+        1. Hunyuan3D 2.0 multi-view reconstruction (if enabled and available)
+        2. TSDF depth-fusion via MeshExtractor
+        3. MeshExtractor.extract_from_pointcloud (Poisson-like fallback)
+        4. Open3D Poisson (legacy fallback)
+
+        Saves per-object OBJ + texture to objects/meshes/.
+        """
+        meshes_dir = self.output_dir / "objects" / "meshes"
         meshes_dir.mkdir(parents=True, exist_ok=True)
         results: list[dict[str, Any]] = []
 
         for obj in self._extracted_objects:
             label = obj.get("label", "unknown")
             ply_path = obj.get("ply")
-            if not ply_path:
+            if not ply_path or not Path(ply_path).exists():
+                logger.warning("Skipping '%s': PLY not found at %s", label, ply_path)
                 continue
 
             safe_name = label.replace(" ", "_").replace("/", "_")[:50]
-            mesh_path = meshes_dir / f"{safe_name}.glb"
+            obj_dir = meshes_dir / safe_name
+            obj_dir.mkdir(parents=True, exist_ok=True)
+            mesh_obj_path = obj_dir / f"{safe_name}.obj"
+            mesh_glb_path = obj_dir / f"{safe_name}.glb"
 
-            try:
-                mesh_result = self.mcp.plugin_invoke(
-                    "mesh2splat", "ply_to_mesh",
-                    {"input": ply_path, "output": str(mesh_path)},
-                )
-                vertex_count = mesh_result.get("vertex_count", 0) if isinstance(mesh_result, dict) else 0
-                results.append({
-                    "label": label,
-                    "mesh": str(mesh_path),
-                    "vertex_count": vertex_count,
-                })
-            except McpError as exc:
-                logger.warning("Meshing failed for '%s': %s", label, exc)
-                # Fallback: try Open3D if available
-                try:
-                    self._mesh_with_open3d(ply_path, str(mesh_path))
-                    results.append({
-                        "label": label,
-                        "mesh": str(mesh_path),
-                        "vertex_count": 0,
-                    })
-                except Exception as o3d_exc:
-                    logger.warning("Open3D fallback also failed: %s", o3d_exc)
+            mesh_result = self._mesh_single_object(
+                label, ply_path, obj_dir, mesh_obj_path, mesh_glb_path,
+            )
+            if mesh_result is not None:
+                results.append(mesh_result)
 
         if not results:
             return StageResult(
@@ -892,6 +962,125 @@ class PipelineOrchestrator:
             artifacts={f"mesh:{r['label']}": r["mesh"] for r in results},
         )
 
+    def _mesh_single_object(
+        self,
+        label: str,
+        ply_path: str,
+        obj_dir: Path,
+        mesh_obj_path: Path,
+        mesh_glb_path: Path,
+    ) -> dict[str, Any] | None:
+        """Try all meshing strategies for a single object PLY."""
+        import numpy as np
+        import trimesh
+
+        # --- Strategy 1: Hunyuan3D 2.0 ---
+        if self.config.hunyuan3d.enabled:
+            try:
+                from pipeline.hunyuan3d_client import Hunyuan3DClient
+
+                h3d = Hunyuan3DClient(
+                    comfyui_url=self.config.hunyuan3d.comfyui_url,
+                    api_url=self.config.hunyuan3d.api_url,
+                    quality=self.config.hunyuan3d.quality,
+                    multiview=self.config.hunyuan3d.multiview,
+                    turbo=self.config.hunyuan3d.turbo,
+                    timeout=self.config.hunyuan3d.timeout,
+                    seed=self.config.hunyuan3d.seed,
+                )
+                result = h3d.reconstruct_from_gaussians(ply_path)
+                if result.mesh is not None:
+                    result.mesh.export(str(mesh_glb_path))
+                    # Also export OBJ for texture baking compatibility
+                    result.mesh.export(str(mesh_obj_path))
+                    vc = len(result.mesh.vertices)
+                    logger.info(
+                        "Hunyuan3D mesh for '%s': %d verts -> %s",
+                        label, vc, mesh_glb_path,
+                    )
+                    return {
+                        "label": label,
+                        "mesh": str(mesh_glb_path),
+                        "mesh_obj": str(mesh_obj_path),
+                        "ply": ply_path,
+                        "vertex_count": vc,
+                        "method": "hunyuan3d",
+                    }
+            except Exception as exc:
+                logger.warning("Hunyuan3D failed for '%s': %s", label, exc)
+
+        # --- Strategy 2: TSDF depth-fusion ---
+        try:
+            from pipeline.mesh_extractor import MeshExtractor, TSDFConfig
+
+            tsdf_cfg = TSDFConfig(
+                target_faces=self.config.mesh.max_vertices // 2,
+                mcp_endpoint=self.config.mcp_endpoint,
+            )
+            extractor = MeshExtractor(config=tsdf_cfg)
+            mesh = extractor.extract_from_mcp()
+            mesh.export(str(mesh_glb_path))
+            mesh.export(str(mesh_obj_path))
+            vc = len(mesh.vertices)
+            logger.info("TSDF mesh for '%s': %d verts", label, vc)
+            return {
+                "label": label,
+                "mesh": str(mesh_glb_path),
+                "mesh_obj": str(mesh_obj_path),
+                "ply": ply_path,
+                "vertex_count": vc,
+                "method": "tsdf",
+            }
+        except Exception as exc:
+            logger.warning("TSDF meshing failed for '%s': %s", label, exc)
+
+        # --- Strategy 3: Point cloud marching cubes ---
+        try:
+            from pipeline.mesh_extractor import MeshExtractor
+
+            pcd = trimesh.load(ply_path)
+            points = np.asarray(pcd.vertices) if hasattr(pcd, "vertices") else np.asarray(pcd.points)
+            colors = None
+            if hasattr(pcd, "colors") and pcd.colors is not None:
+                colors = np.asarray(pcd.colors)[:, :3]
+            elif hasattr(pcd, "visual") and hasattr(pcd.visual, "vertex_colors"):
+                colors = np.asarray(pcd.visual.vertex_colors)[:, :3]
+
+            extractor = MeshExtractor()
+            mesh = extractor.extract_from_pointcloud(
+                points, colors=colors,
+                target_faces=self.config.mesh.max_vertices // 2,
+            )
+            mesh.export(str(mesh_glb_path))
+            mesh.export(str(mesh_obj_path))
+            vc = len(mesh.vertices)
+            logger.info("Point-cloud mesh for '%s': %d verts", label, vc)
+            return {
+                "label": label,
+                "mesh": str(mesh_glb_path),
+                "mesh_obj": str(mesh_obj_path),
+                "ply": ply_path,
+                "vertex_count": vc,
+                "method": "pointcloud",
+            }
+        except Exception as exc:
+            logger.warning("Point-cloud meshing failed for '%s': %s", label, exc)
+
+        # --- Strategy 4: Open3D Poisson fallback ---
+        try:
+            self._mesh_with_open3d(ply_path, str(mesh_glb_path))
+            return {
+                "label": label,
+                "mesh": str(mesh_glb_path),
+                "ply": ply_path,
+                "vertex_count": 0,
+                "method": "open3d",
+            }
+        except Exception as exc:
+            logger.warning("Open3D fallback failed for '%s': %s", label, exc)
+
+        return None
+
     @staticmethod
     def _mesh_with_open3d(ply_path: str, output_path: str) -> None:
         """Fallback Poisson surface reconstruction using Open3D."""
@@ -902,6 +1091,79 @@ class PipelineOrchestrator:
             pcd.estimate_normals()
         mesh, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd, depth=9)
         o3d.io.write_triangle_mesh(output_path, mesh)
+
+    def _run_texture_bake(self) -> StageResult:
+        """Bake diffuse textures onto each object mesh.
+
+        For meshes with vertex colors (from TSDF or point-cloud extraction),
+        bakes vertex colors into a UV texture atlas. For meshes without
+        vertex colors, renders views from MCP and projects them.
+        """
+        if not self._mesh_results:
+            logger.info("No meshes to texture, skipping")
+            return StageResult(
+                success=True, state=self._state,
+                metrics={"skipped": True},
+            )
+
+        from pipeline.texture_baker import TextureBaker, BakeConfig
+        import trimesh
+
+        bake_cfg = BakeConfig(
+            mcp_endpoint=self.config.mcp_endpoint,
+        )
+        baker = TextureBaker(config=bake_cfg)
+        baked_count = 0
+
+        for mesh_info in self._mesh_results:
+            label = mesh_info.get("label", "unknown")
+            mesh_path = mesh_info.get("mesh_obj") or mesh_info.get("mesh")
+            if not mesh_path or not Path(mesh_path).exists():
+                logger.warning("Skipping texture bake for '%s': mesh not found", label)
+                continue
+
+            safe_name = label.replace(" ", "_").replace("/", "_")[:50]
+            texture_dir = self.output_dir / "objects" / "meshes" / safe_name
+            texture_dir.mkdir(parents=True, exist_ok=True)
+            texture_path = texture_dir / f"{safe_name}_diffuse.png"
+            textured_mesh_path = texture_dir / f"{safe_name}_textured.obj"
+
+            try:
+                mesh = trimesh.load(mesh_path, process=False)
+
+                has_vertex_colors = (
+                    mesh.visual is not None
+                    and hasattr(mesh.visual, "vertex_colors")
+                    and mesh.visual.vertex_colors is not None
+                    and len(mesh.visual.vertex_colors) > 0
+                )
+
+                if has_vertex_colors:
+                    textured_mesh, tex_path = baker.bake_from_vertex_colors(
+                        mesh, output_texture_path=texture_path,
+                    )
+                else:
+                    textured_mesh, tex_path = baker.bake(
+                        mesh, output_texture_path=texture_path,
+                    )
+
+                textured_mesh.export(str(textured_mesh_path))
+                mesh_info["textured_mesh"] = str(textured_mesh_path)
+                mesh_info["texture"] = str(tex_path)
+                baked_count += 1
+                logger.info("Baked texture for '%s' -> %s", label, tex_path)
+
+            except Exception as exc:
+                logger.warning("Texture baking failed for '%s': %s", label, exc)
+
+        return StageResult(
+            success=True, state=self._state,
+            metrics={"baked_count": baked_count, "total_meshes": len(self._mesh_results)},
+            artifacts={
+                f"texture:{r['label']}": r.get("texture", "")
+                for r in self._mesh_results if r.get("texture")
+            },
+        )
 
     def _run_quality_gate_2(self) -> StageResult:
         """Evaluate mesh quality and round-trip fidelity."""
