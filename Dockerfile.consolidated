@@ -170,172 +170,8 @@ RUN ln -sf /opt/gaussian-toolkit/src/pipeline /opt/pipeline && \
 # ---------------------------------------------------------------------------
 # PHASE 10: Minimal Flask web interface (placeholder for web-interface agent)
 # ---------------------------------------------------------------------------
-RUN mkdir -p /opt/web-interface/templates
-
-COPY <<'FLASK_APP' /opt/web-interface/app.py
-import os
-import json
-import subprocess
-from flask import Flask, render_template, request, jsonify, send_from_directory
-
-app = Flask(__name__)
-
-MODELS_DIR = "/opt/models"
-OUTPUT_DIR = "/opt/output"
-PIPELINE_DIR = "/opt/gaussian-toolkit/src/pipeline"
-
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-@app.route("/")
-def index():
-    return render_template("index.html")
-
-@app.route("/api/health")
-def health():
-    gpu_info = "unavailable"
-    try:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,memory.used,memory.total", "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=5
-        )
-        gpu_info = result.stdout.strip()
-    except Exception:
-        pass
-    return jsonify({
-        "status": "ok",
-        "gpus": gpu_info,
-        "comfyui": os.path.exists("/opt/comfyui/main.py"),
-        "colmap": os.path.exists("/usr/local/bin/colmap"),
-        "blender": os.path.exists("/usr/local/bin/blender"),
-    })
-
-@app.route("/api/models")
-def list_models():
-    models = {}
-    for subdir in os.listdir(MODELS_DIR):
-        path = os.path.join(MODELS_DIR, subdir)
-        if os.path.isdir(path):
-            models[subdir] = os.listdir(path)
-    return jsonify(models)
-
-@app.route("/api/outputs")
-def list_outputs():
-    outputs = []
-    for root, dirs, files in os.walk(OUTPUT_DIR):
-        for f in files:
-            rel = os.path.relpath(os.path.join(root, f), OUTPUT_DIR)
-            outputs.append(rel)
-    return jsonify(outputs)
-
-@app.route("/api/outputs/<path:filename>")
-def serve_output(filename):
-    return send_from_directory(OUTPUT_DIR, filename)
-
-@app.route("/api/run", methods=["POST"])
-def run_pipeline():
-    data = request.get_json() or {}
-    cmd = data.get("command", "")
-    if not cmd:
-        return jsonify({"error": "No command specified"}), 400
-    try:
-        result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=3600,
-            cwd=PIPELINE_DIR
-        )
-        return jsonify({
-            "returncode": result.returncode,
-            "stdout": result.stdout[-10000:],
-            "stderr": result.stderr[-5000:],
-        })
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "Command timed out after 3600s"}), 504
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=7860, debug=False)
-FLASK_APP
-
-COPY <<'INDEX_HTML' /opt/web-interface/templates/index.html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LichtFeld Studio - Gaussian Toolkit</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; }
-        .header { background: #1a1a2e; padding: 1rem 2rem; border-bottom: 1px solid #333; }
-        .header h1 { font-size: 1.5rem; color: #00d4ff; }
-        .container { max-width: 1200px; margin: 2rem auto; padding: 0 2rem; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; }
-        .card { background: #1a1a2e; border: 1px solid #333; border-radius: 8px; padding: 1.5rem; }
-        .card h2 { color: #00d4ff; margin-bottom: 1rem; font-size: 1.1rem; }
-        .status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-        .status.ok { background: #00ff88; }
-        .status.err { background: #ff4444; }
-        pre { background: #0d0d1a; padding: 1rem; border-radius: 4px; overflow-x: auto; font-size: 0.85rem; color: #aaa; margin-top: 0.5rem; }
-        button { background: #00d4ff; color: #000; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-weight: 600; }
-        button:hover { background: #00b8e0; }
-        #outputs-list { max-height: 300px; overflow-y: auto; }
-        .output-item { padding: 0.3rem 0; border-bottom: 1px solid #222; font-size: 0.85rem; }
-    </style>
-</head>
-<body>
-    <div class="header"><h1>LichtFeld Studio / Gaussian Toolkit Pipeline</h1></div>
-    <div class="container">
-        <div class="grid">
-            <div class="card">
-                <h2>System Health</h2>
-                <div id="health">Loading...</div>
-            </div>
-            <div class="card">
-                <h2>Models</h2>
-                <div id="models">Loading...</div>
-            </div>
-            <div class="card">
-                <h2>Outputs</h2>
-                <div id="outputs-list">Loading...</div>
-            </div>
-        </div>
-    </div>
-    <script>
-        async function loadHealth() {
-            try {
-                const r = await fetch('/api/health');
-                const d = await r.json();
-                const el = document.getElementById('health');
-                el.innerHTML = `
-                    <p><span class="status ${d.status==='ok'?'ok':'err'}"></span>Pipeline: ${d.status}</p>
-                    <p><span class="status ${d.colmap?'ok':'err'}"></span>COLMAP: ${d.colmap?'installed':'missing'}</p>
-                    <p><span class="status ${d.blender?'ok':'err'}"></span>Blender: ${d.blender?'installed':'missing'}</p>
-                    <p><span class="status ${d.comfyui?'ok':'err'}"></span>ComfyUI: ${d.comfyui?'installed':'missing'}</p>
-                    <pre>${d.gpus}</pre>`;
-            } catch(e) { document.getElementById('health').textContent = 'Error: ' + e; }
-        }
-        async function loadModels() {
-            try {
-                const r = await fetch('/api/models');
-                const d = await r.json();
-                const el = document.getElementById('models');
-                el.innerHTML = Object.entries(d).map(([k,v]) =>
-                    `<p><strong>${k}</strong>: ${v.length} file(s)</p>`
-                ).join('') || '<p>No models found</p>';
-            } catch(e) { document.getElementById('models').textContent = 'Error: ' + e; }
-        }
-        async function loadOutputs() {
-            try {
-                const r = await fetch('/api/outputs');
-                const d = await r.json();
-                const el = document.getElementById('outputs-list');
-                el.innerHTML = d.map(f => `<div class="output-item">${f}</div>`).join('') || '<p>No outputs yet</p>';
-            } catch(e) { document.getElementById('outputs-list').textContent = 'Error: ' + e; }
-        }
-        loadHealth(); loadModels(); loadOutputs();
-        setInterval(loadHealth, 30000);
-    </script>
-</body>
-</html>
-INDEX_HTML
+# Web interface from the gaussian-toolkit repo (cloned in Phase 5)
+RUN ln -sf /opt/gaussian-toolkit/src/web /opt/web-interface
 
 # ---------------------------------------------------------------------------
 # PHASE 11: Model directory structure
@@ -358,7 +194,7 @@ RUN mkdir -p /opt/models/diffusion_models \
 # ---------------------------------------------------------------------------
 RUN mkdir -p /var/log/supervisor /var/run/supervisor /root/.fluxbox
 
-COPY <<'SUPERVISORD_CONF' /etc/supervisor/conf.d/gaussian-toolkit.conf
+RUN cat > /etc/supervisor/conf.d/gaussian-toolkit.conf << 'SUPERVISORD_CONF'
 [supervisord]
 nodaemon=true
 logfile=/var/log/supervisor/supervisord.log
@@ -412,7 +248,7 @@ SUPERVISORD_CONF
 # ---------------------------------------------------------------------------
 # PHASE 13: Entrypoint
 # ---------------------------------------------------------------------------
-COPY <<'ENTRYPOINT_SH' /opt/entrypoint.sh
+RUN cat > /opt/entrypoint.sh << 'ENTRYPOINT_EOF'
 #!/bin/bash
 set -e
 
@@ -446,7 +282,7 @@ fi
 # ---- Step 3: Start supervisord ----
 echo "[init] Starting supervisord ..."
 exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
-ENTRYPOINT_SH
+ENTRYPOINT_EOF
 
 RUN chmod +x /opt/entrypoint.sh
 
