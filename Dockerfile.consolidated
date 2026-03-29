@@ -216,7 +216,15 @@ RUN mkdir -p /opt/models/diffusion_models \
              /opt/models/sams \
              /opt/models/hunyuan3d \
     && mkdir -p /opt/output \
-    && mkdir -p /models-staging
+    && mkdir -p /models-staging \
+    && mkdir -p /data/output /data/input
+
+# Non-root user for Claude Code (refuses to run as root)
+RUN useradd -m -u 1000 -s /bin/bash -G video,audio gaussian && \
+    echo "gaussian ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
+    chown -R gaussian:gaussian /data /opt/output /opt/gaussian-toolkit 2>/dev/null || true && \
+    mkdir -p /home/gaussian/.claude /home/gaussian/.config && \
+    chown -R gaussian:gaussian /home/gaussian
 
 # ---------------------------------------------------------------------------
 # PHASE 12: VNC + supervisord configuration
