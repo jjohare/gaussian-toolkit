@@ -41,6 +41,10 @@ RUN curl -fsSL https://nodejs.org/dist/v23.11.1/node-v23.11.1-linux-x64.tar.xz \
         | tar -xJ -C /usr/local --strip-components=1 \
     && npm install -g @anthropic-ai/claude-code
 
+# ttyd — web terminal over HTTP
+RUN curl -fsSL https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 \
+        -o /usr/local/bin/ttyd && chmod +x /usr/local/bin/ttyd
+
 # ---------------------------------------------------------------------------
 # PHASE 3: METIS + GKlib from source (required by COLMAP via Ceres/SuiteSparse)
 # ---------------------------------------------------------------------------
@@ -205,6 +209,9 @@ RUN mkdir -p /var/log/supervisor /var/run/supervisor /root/.fluxbox
 
 COPY docker/supervisord.conf /etc/supervisor/conf.d/gaussian-toolkit.conf
 
+# Claude Code agent instructions for in-container use
+COPY CLAUDE_CONTAINER.md /opt/gaussian-toolkit/CLAUDE.md
+
 # ---------------------------------------------------------------------------
 # PHASE 13: Entrypoint
 # ---------------------------------------------------------------------------
@@ -226,10 +233,11 @@ ENV VCPKG_ROOT=/opt/vcpkg
 # Exposed ports
 # ---------------------------------------------------------------------------
 # 7860  = Web interface (Flask)
+# 7681  = Web terminal (ttyd)
 # 8188  = ComfyUI
 # 45677 = LichtFeld Studio (if applicable)
 # 5901  = VNC
-EXPOSE 7860 8188 45677 5901
+EXPOSE 7860 7681 8188 45677 5901
 
 WORKDIR /opt/gaussian-toolkit
 
