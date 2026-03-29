@@ -106,7 +106,7 @@ class Hunyuan3DConfig:
 @dataclass
 class PersonRemovalConfig:
     """Person detection and removal parameters."""
-    enabled: bool = True
+    enabled: bool = False  # Disabled by default until runtime deps verified
     method: str = "opencv"
     comfyui_url: str = "http://localhost:8188"
     flux_endpoint: str = ""
