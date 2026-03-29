@@ -1141,24 +1141,66 @@ class PipelineOrchestrator:
         import numpy as np
         import trimesh
 
+        # --- Load and normalise point cloud from PLY ---
+        points, colors = self._load_ply_points(ply_path)
+        if points is None or len(points) == 0:
+            logger.warning("No points loaded from PLY for '%s'", label)
+            return None
+
+        # Normalize points to unit cube centered at origin so voxel grids
+        # don't blow up. Store transform to undo later if needed.
+        centroid = points.mean(axis=0)
+        extent = points.max(axis=0) - points.min(axis=0)
+        scale = extent.max()
+        if scale == 0:
+            scale = 1.0
+        points_norm = (points - centroid) / scale
+
+        logger.info(
+            "PLY for '%s': %d points, extent=%.1f, centroid=%s",
+            label, len(points), scale, centroid,
+        )
+
+        def _export_mesh(mesh: "trimesh.Trimesh", method: str) -> dict[str, Any] | None:
+            """Rescale mesh back to original coordinates and export."""
+            # Undo normalization
+            mesh.vertices = mesh.vertices * scale + centroid
+            mesh.export(str(mesh_glb_path))
+            mesh.export(str(mesh_obj_path))
+            vc = len(mesh.vertices)
+            logger.info("%s mesh for '%s': %d verts", method, label, vc)
+            return {
+                "label": label,
+                "mesh": str(mesh_glb_path),
+                "mesh_obj": str(mesh_obj_path),
+                "ply": ply_path,
+                "vertex_count": vc,
+                "method": method,
+            }
+
         # --- Strategy 1: Hunyuan3D 2.0 ---
         if self.config.hunyuan3d.enabled:
             try:
                 from pipeline.hunyuan3d_client import Hunyuan3DClient
 
-                h3d = Hunyuan3DClient(
-                    comfyui_url=self.config.hunyuan3d.comfyui_url,
-                    api_url=self.config.hunyuan3d.api_url,
-                    quality=self.config.hunyuan3d.quality,
-                    multiview=self.config.hunyuan3d.multiview,
-                    turbo=self.config.hunyuan3d.turbo,
-                    timeout=self.config.hunyuan3d.timeout,
-                    seed=self.config.hunyuan3d.seed,
-                )
+                h3d_kwargs = {
+                    "comfyui_url": self.config.hunyuan3d.comfyui_url,
+                    "api_url": self.config.hunyuan3d.api_url,
+                    "quality": self.config.hunyuan3d.quality,
+                    "turbo": self.config.hunyuan3d.turbo,
+                    "timeout": self.config.hunyuan3d.timeout,
+                    "seed": self.config.hunyuan3d.seed,
+                }
+                # Only pass multiview if the client supports it
+                import inspect
+                sig = inspect.signature(Hunyuan3DClient.__init__)
+                if "multiview" in sig.parameters:
+                    h3d_kwargs["multiview"] = self.config.hunyuan3d.multiview
+
+                h3d = Hunyuan3DClient(**h3d_kwargs)
                 result = h3d.reconstruct_from_gaussians(ply_path)
                 if result.mesh is not None:
                     result.mesh.export(str(mesh_glb_path))
-                    # Also export OBJ for texture baking compatibility
                     result.mesh.export(str(mesh_obj_path))
                     vc = len(result.mesh.vertices)
                     logger.info(
@@ -1188,55 +1230,29 @@ class PipelineOrchestrator:
             try:
                 mesh = extractor.extract_from_mcp()
             except Exception:
-                # MCP unavailable — try extracting from PLY file directly
+                # MCP unavailable — use normalized points for manageable grid
                 mesh = extractor.extract_from_pointcloud(
-                    np.asarray(trimesh.load(ply_path).vertices),
+                    points_norm, colors=colors,
                     target_faces=self.config.mesh.max_vertices // 2,
                 )
-            mesh.export(str(mesh_glb_path))
-            mesh.export(str(mesh_obj_path))
-            vc = len(mesh.vertices)
-            logger.info("TSDF mesh for '%s': %d verts", label, vc)
-            return {
-                "label": label,
-                "mesh": str(mesh_glb_path),
-                "mesh_obj": str(mesh_obj_path),
-                "ply": ply_path,
-                "vertex_count": vc,
-                "method": "tsdf",
-            }
+            result = _export_mesh(mesh, "tsdf")
+            if result:
+                return result
         except Exception as exc:
             logger.warning("TSDF meshing failed for '%s': %s", label, exc)
 
-        # --- Strategy 3: Point cloud marching cubes ---
+        # --- Strategy 3: Point cloud marching cubes (normalized) ---
         try:
             from pipeline.mesh_extractor import MeshExtractor
 
-            pcd = trimesh.load(ply_path)
-            points = np.asarray(pcd.vertices) if hasattr(pcd, "vertices") else np.asarray(pcd.points)
-            colors = None
-            if hasattr(pcd, "colors") and pcd.colors is not None:
-                colors = np.asarray(pcd.colors)[:, :3]
-            elif hasattr(pcd, "visual") and hasattr(pcd.visual, "vertex_colors"):
-                colors = np.asarray(pcd.visual.vertex_colors)[:, :3]
-
             extractor = MeshExtractor()
             mesh = extractor.extract_from_pointcloud(
-                points, colors=colors,
+                points_norm, colors=colors,
                 target_faces=self.config.mesh.max_vertices // 2,
             )
-            mesh.export(str(mesh_glb_path))
-            mesh.export(str(mesh_obj_path))
-            vc = len(mesh.vertices)
-            logger.info("Point-cloud mesh for '%s': %d verts", label, vc)
-            return {
-                "label": label,
-                "mesh": str(mesh_glb_path),
-                "mesh_obj": str(mesh_obj_path),
-                "ply": ply_path,
-                "vertex_count": vc,
-                "method": "pointcloud",
-            }
+            result = _export_mesh(mesh, "pointcloud")
+            if result:
+                return result
         except Exception as exc:
             logger.warning("Point-cloud meshing failed for '%s': %s", label, exc)
 
@@ -1253,7 +1269,111 @@ class PipelineOrchestrator:
         except Exception as exc:
             logger.warning("Open3D fallback failed for '%s': %s", label, exc)
 
+        # --- Strategy 5: Trimesh convex hull (always works, no deps) ---
+        try:
+            pcd = trimesh.PointCloud(points)
+            mesh = pcd.convex_hull
+            if mesh is not None and len(mesh.vertices) > 0:
+                mesh.export(str(mesh_glb_path))
+                mesh.export(str(mesh_obj_path))
+                vc = len(mesh.vertices)
+                logger.info("Convex hull mesh for '%s': %d verts", label, vc)
+                return {
+                    "label": label,
+                    "mesh": str(mesh_glb_path),
+                    "mesh_obj": str(mesh_obj_path),
+                    "ply": ply_path,
+                    "vertex_count": vc,
+                    "method": "convex_hull",
+                }
+        except Exception as exc:
+            logger.warning("Convex hull fallback failed for '%s': %s", label, exc)
+
         return None
+
+    @staticmethod
+    def _load_ply_points(ply_path: str) -> tuple:
+        """Load points and colors from a PLY file (handles both 3DGS and standard PLYs).
+
+        Returns:
+            Tuple of (points: np.ndarray Nx3, colors: np.ndarray Nx3 or None)
+        """
+        import numpy as np
+
+        points = None
+        colors = None
+
+        # Try plyfile first (handles 3DGS PLYs with custom properties)
+        try:
+            from plyfile import PlyData
+            ply = PlyData.read(ply_path)
+            vertex = ply["vertex"]
+            x = np.asarray(vertex["x"])
+            y = np.asarray(vertex["y"])
+            z = np.asarray(vertex["z"])
+            points = np.column_stack([x, y, z])
+
+            # Extract colors if available (various naming conventions)
+            for r_name, g_name, b_name in [
+                ("red", "green", "blue"),
+                ("f_dc_0", "f_dc_1", "f_dc_2"),  # 3DGS SH DC component
+            ]:
+                if r_name in vertex.data.dtype.names:
+                    r = np.asarray(vertex[r_name])
+                    g = np.asarray(vertex[g_name])
+                    b = np.asarray(vertex[b_name])
+                    c = np.column_stack([r, g, b])
+                    # Normalize to 0-255 range
+                    if c.max() <= 1.0:
+                        c = (c * 255).clip(0, 255).astype(np.uint8)
+                    elif c.max() > 255:
+                        # SH DC coefficients — convert to approximate RGB
+                        c = ((c * 0.2822 + 0.5) * 255).clip(0, 255).astype(np.uint8)
+                    colors = c
+                    break
+
+            # Filter out NaN/inf points
+            valid = np.isfinite(points).all(axis=1)
+            if not valid.all():
+                points = points[valid]
+                if colors is not None:
+                    colors = colors[valid]
+
+            return points, colors
+        except Exception:
+            pass
+
+        # Fallback: trimesh
+        try:
+            import trimesh
+            loaded = trimesh.load(ply_path)
+            if hasattr(loaded, "vertices") and loaded.vertices is not None:
+                points = np.asarray(loaded.vertices)
+            elif hasattr(loaded, "points"):
+                points = np.asarray(loaded.points) if hasattr(loaded.points, '__len__') else None
+
+            if points is not None:
+                # Extract colors safely
+                try:
+                    if hasattr(loaded, "visual") and hasattr(loaded.visual, "vertex_colors"):
+                        vc = np.asarray(loaded.visual.vertex_colors)
+                        if vc.ndim == 2 and vc.shape[1] >= 3:
+                            colors = vc[:, :3]
+                except Exception:
+                    pass
+
+                # Filter NaN/inf
+                valid = np.isfinite(points).all(axis=1)
+                if not valid.all():
+                    points = points[valid]
+                    if colors is not None:
+                        colors = colors[valid]
+
+            return points, colors
+        except Exception:
+            pass
+
+        return None, None
 
     @staticmethod
     def _mesh_with_open3d(ply_path: str, output_path: str) -> None:
