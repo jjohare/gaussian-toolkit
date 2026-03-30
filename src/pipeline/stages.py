@@ -559,9 +559,18 @@ class PipelineStages:
     # ------------------------------------------------------------------
 
     def train(self, colmap_dir: str, iterations: int = 30000) -> StageResult:
-        """Run LichtFeld headless training.
+        """Run gaussian splatting training.
 
-        Returns: {ply_path, loss}
+        Supports multiple backends via ``config.training.mesh_method``:
+
+        - ``tsdf`` (default): LichtFeld headless training, mesh extracted later
+          in ``mesh_objects``.
+        - ``milo``: MILo (SIGGRAPH Asia 2025) differentiable mesh-in-the-loop
+          training. Produces BOTH the gaussian PLY and a high-quality mesh in a
+          single pass, so the ``mesh_objects`` stage can be skipped for the
+          scene-level mesh.
+
+        Returns: {ply_path, loss} -- and for MILo also {milo_mesh_path}
         """
         dataset_dir = Path(colmap_dir)
         if not dataset_dir.exists():
@@ -570,6 +579,11 @@ class PipelineStages:
                 error=f"COLMAP directory not found: {colmap_dir}",
             )
 
+        # -- MILo backend ----------------------------------------------------
+        if self.config.training.mesh_method == "milo":
+            return self._train_milo(colmap_dir, dataset_dir)
+
+        # -- Default LichtFeld backend ---------------------------------------
         model_dir = self.job_dir / "model"
         model_dir.mkdir(parents=True, exist_ok=True)
 
@@ -636,6 +650,67 @@ class PipelineStages:
                 "strategy": strategy,
             },
             artifacts={"ply_path": str(ply_path), "model_dir": str(model_dir)},
+        )
+
+    def _train_milo(self, colmap_dir: str, dataset_dir: Path) -> StageResult:
+        """Run MILo training + mesh extraction in the isolated conda env.
+
+        MILo produces both gaussian splats AND a mesh in a single pipeline,
+        so when this succeeds the caller can skip the ``mesh_objects`` stage
+        for the scene-level mesh.
+        """
+        from pipeline.milo_extractor import run_milo, is_milo_available, MiloConfig
+
+        if not is_milo_available():
+            logger.warning("MILo requested but not available, falling back to LichtFeld")
+            # Recurse with tsdf to use the default backend
+            original_method = self.config.training.mesh_method
+            self.config.training.mesh_method = "tsdf"
+            result = self.train(colmap_dir, self.config.training.iterations)
+            self.config.training.mesh_method = original_method
+            if result.success:
+                result.metrics["fallback"] = "lichtfeld (milo unavailable)"
+            return result
+
+        milo_output = self.job_dir / "model_milo"
+
+        milo_cfg = MiloConfig(
+            imp_metric="indoor",
+            iterations=self.config.training.iterations
+            if self.config.training.iterations <= 30000
+            else 18000,
+        )
+
+        logger.info("Running MILo training on %s -> %s", colmap_dir, milo_output)
+        milo_result = run_milo(str(dataset_dir), str(milo_output), config=milo_cfg)
+
+        if not milo_result["success"]:
+            return StageResult(
+                success=False, stage="train",
+                error=f"MILo failed: {milo_result['error']}",
+                metrics={"backend": "milo", "duration": milo_result["duration"]},
+            )
+
+        artifacts: dict[str, str] = {"model_dir": str(milo_output)}
+        metrics: dict[str, Any] = {
+            "backend": "milo",
+            "duration": round(milo_result["duration"], 1),
+            "milo_mesh_path": milo_result["mesh_path"],
+        }
+
+        if milo_result["ply_path"]:
+            ply_path = Path(milo_result["ply_path"])
+            artifacts["ply_path"] = str(ply_path)
+            metrics["ply_path"] = str(ply_path)
+            metrics["ply_size_mb"] = round(_get_file_size_mb(ply_path), 1)
+
+        if milo_result["mesh_path"]:
+            artifacts["milo_mesh_path"] = milo_result["mesh_path"]
+
+        return StageResult(
+            success=True, stage="train",
+            metrics=metrics,
+            artifacts=artifacts,
         )
 
     # ------------------------------------------------------------------

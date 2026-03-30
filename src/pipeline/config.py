@@ -48,6 +48,7 @@ class TrainingConfig:
     convergence_window: int = 500
     convergence_threshold: float = 0.001
     checkpoint_interval: int = 5000
+    mesh_method: str = "tsdf"  # "tsdf" (default), "milo", or "sugar"
 
 
 @dataclass

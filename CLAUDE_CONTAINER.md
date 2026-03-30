@@ -143,6 +143,43 @@ If training fails or quality is poor, adjust `iterations` or try `strategy="mcmc
 
 **DO NOT STOP HERE. Continue to segmentation.**
 
+---
+
+## Step 5b: MILo Training (preferred -- produces mesh directly)
+
+If MILo conda environment is available, use it instead of LichtFeld + TSDF:
+
+```bash
+# Check if MILo is installed
+conda run -n milo python -c "import torch; print('MILo OK')" 2>/dev/null
+
+# If available, run MILo training + mesh extraction
+python3 -c "
+import sys; sys.path.insert(0, 'src')
+from pipeline.milo_extractor import run_milo, is_milo_available, MiloConfig
+if is_milo_available():
+    result = run_milo(
+        colmap_dir='/data/output/JOB_ID/colmap/undistorted',
+        output_dir='/data/output/JOB_ID/model_milo',
+        config=MiloConfig(imp_metric='indoor', mesh_config='default'),
+    )
+    print(result)
+    if result['success']:
+        print(f'MILo mesh: {result[\"mesh_path\"]}')
+        # Skip to Step 9 (Blender assembly) -- no separate TSDF needed
+else:
+    print('MILo not available, using LichtFeld + TSDF pipeline')
+"
+```
+
+MILo trains for 18K iterations with mesh-in-the-loop regularization.
+The output mesh is via learned SDF extraction -- much higher quality than TSDF.
+If MILo produced a mesh, **skip Steps 6-8** and go directly to Step 9 (Blender assembly).
+
+Quality targets for MILo:
+- Mesh should have 50K-500K vertices depending on mesh_config
+- Vertex colors from gaussian splatting
+- Clean surface topology (no TSDF lumpiness)
 
 ---
 
@@ -341,6 +378,7 @@ curl -X POST http://localhost:7860/api/job/JOB_ID/complete \
 | SAM3 | 2+ objects identified | (fallback to full_scene is OK) |
 | Per-object mesh | >5K verts per object | <500 verts |
 | Room mesh | >30K verts | <5K verts |
+| MILo mesh | 50K-500K verts, vertex colors, clean topology | <10K verts or no mesh produced |
 | Final USD | Room + objects with materials | Empty scene |
 
 ### Key Environment Variables

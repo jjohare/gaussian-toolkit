@@ -241,7 +241,17 @@ COPY docker/supervisord.conf /etc/supervisor/conf.d/gaussian-toolkit.conf
 COPY CLAUDE_CONTAINER.md /opt/gaussian-toolkit/CLAUDE.md
 
 # ---------------------------------------------------------------------------
-# PHASE 13: Entrypoint
+# PHASE 13: MILo (optional — high-quality mesh extraction)
+# Build with: docker build --build-arg INSTALL_MILO=1
+# ---------------------------------------------------------------------------
+ARG INSTALL_MILO=0
+COPY docker/install_milo.sh /tmp/install_milo.sh
+RUN if [ "$INSTALL_MILO" = "1" ]; then bash /tmp/install_milo.sh; fi
+ENV MILO_DIR=/opt/milo
+ENV MILO_CONDA_ENV=milo
+
+# ---------------------------------------------------------------------------
+# PHASE 14: Entrypoint
 # ---------------------------------------------------------------------------
 COPY docker/entrypoint.sh /opt/entrypoint.sh
 RUN chmod +x /opt/entrypoint.sh
