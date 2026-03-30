@@ -1120,9 +1120,9 @@ class PipelineStages:
                     future = executor.submit(
                         self._mesh_single, label, str(ply), obj_dir, mesh_obj, mesh_glb,
                     )
-                    mesh_result = future.result(timeout=600)
+                    mesh_result = future.result(timeout=1200)
             except FuturesTimeout:
-                logger.warning("Meshing timed out (600s) for '%s', skipping", label)
+                logger.warning("Meshing timed out (1200s) for '%s', skipping", label)
                 mesh_result = None
             except Exception as exc:
                 logger.warning("Meshing failed for '%s': %s", label, exc)
@@ -1203,8 +1203,8 @@ class PipelineStages:
                         colmap_dir = colmap_candidate
                 mesh, color_images, cameras = extractor.extract_from_gsplat(
                     ply_path,
-                    num_views=32,
-                    render_size=512,
+                    num_views=48,
+                    render_size=768,
                     target_faces=self.config.mesh.max_vertices // 2,
                     preview_dir=previews_dir,
                     colmap_dir=colmap_dir,

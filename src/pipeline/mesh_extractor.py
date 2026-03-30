@@ -856,10 +856,10 @@ class MeshExtractor:
         vol_max = p95 + padding
         vol_extent = vol_max - vol_min
 
-        # Adaptive voxel size: aim for ~128-192 voxels per axis max
-        # (300^3 = 27M voxels is too slow for pure-numpy TSDF integration)
+        # Adaptive voxel size: aim for ~200 voxels per axis
+        # Trade-off: 150^3=2min (coarse), 200^3=16min (good), 300^3=2hr (too slow)
         max_dim = vol_extent.max()
-        voxel_size = max(max_dim / 150.0, 0.01)
+        voxel_size = max(max_dim / 200.0, 0.005)
         sdf_trunc = voxel_size * 5.0
 
         tsdf_config = TSDFConfig(
@@ -874,7 +874,7 @@ class MeshExtractor:
                      voxel_size, sdf_trunc, vol_min.min(), vol_max.max())
 
         # Generate cameras — prefer COLMAP cameras (training viewpoints)
-        max_tsdf_views = 32  # Cap views to keep TSDF integration under 10 min
+        max_tsdf_views = 48  # Cap views — balance quality vs time (~16 min at 200^3)
         cameras = []
         if colmap_dir:
             cameras = load_colmap_cameras(colmap_dir, render_size)
