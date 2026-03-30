@@ -335,37 +335,104 @@ The web UI has an image carousel that displays previews. **You MUST save preview
 during the pipeline so the user can monitor progress visually.** Save as PNG/JPG to the
 job output directory. The carousel auto-refreshes every 30 seconds.
 
-### Required previews:
+### MANDATORY previews (save these or the user cannot monitor progress):
+
+After EACH stage below, save the specified preview images. The web carousel at
+http://localhost:7860 auto-detects any PNG/JPG in the job output directory.
 
 ```bash
 JOB_DIR=/data/output/JOB_ID
 
-# After frame extraction: save a sample frame
-cp $JOB_DIR/frames/frame_00001.jpg $JOB_DIR/preview_frames.jpg
+# 1. After frame extraction: sample frames
+cp $JOB_DIR/frames/frame_00001.jpg $JOB_DIR/preview_01_frame_sample.jpg
 
-# After COLMAP: render a sparse point cloud visualization (optional)
-
-# After training: render the trained scene from 4 viewpoints
+# 2. After training: render RGB from COLMAP camera viewpoints using gsplat
 python3 -c "
-import sys; sys.path.insert(0, 'src')
+import sys, os; sys.path.insert(0, 'src')
 from pipeline.mesh_extractor import load_3dgs_ply, render_gsplat
+from pipeline.colmap_parser import parse_cameras_bin, parse_images_bin
 import torch, numpy as np
 from PIL import Image
-gs = load_3dgs_ply('$JOB_DIR/model/splat_30000.ply')
-# Quick render from a default viewpoint
-viewmat = torch.eye(4, device='cuda'); viewmat[2,3] = -5
-K = torch.tensor([[800,0,512],[0,800,384],[0,0,1]], dtype=torch.float32, device='cuda')
-depth, rgb, alpha = render_gsplat(gs, viewmat, K, 1024, 768)
-img = Image.fromarray((rgb * 255).clip(0,255).astype(np.uint8))
-img.save('$JOB_DIR/preview_training.jpg')
-print('Training preview saved')
+from pathlib import Path
+
+JOB = '$JOB_DIR'
+ply = sorted(Path(f'{JOB}/model').glob('*.ply'))[-1]
+gs = load_3dgs_ply(str(ply))
+
+# Load COLMAP cameras for viewpoint-matched renders
+sparse = Path(f'{JOB}/colmap/undistorted/sparse/0')
+if sparse.exists():
+    import struct
+    # Parse binary cameras for intrinsics
+    with open(sparse / 'cameras.bin', 'rb') as f:
+        n = struct.unpack('<Q', f.read(8))[0]
+        for _ in range(n):
+            cid, model, w, h = struct.unpack('<iiii', f.read(16))
+            nparams = {0:3,1:4,2:4,3:5,4:4,5:5,6:12,7:8,8:12,9:8}.get(model,4)
+            params = struct.unpack(f'<{nparams}d', f.read(8*nparams))
+            focal = params[0]
+            break  # Use first camera
+    K = torch.tensor([[focal,0,w/2],[0,focal,h/2],[0,0,1]], dtype=torch.float32, device='cuda')
+
+    # Parse binary images for extrinsics (first 8)
+    with open(sparse / 'images.bin', 'rb') as f:
+        nimgs = struct.unpack('<Q', f.read(8))[0]
+        preview_dir = Path(f'{JOB}/previews')
+        preview_dir.mkdir(exist_ok=True)
+        for idx in range(min(nimgs, 8)):
+            img_id = struct.unpack('<i', f.read(4))[0]
+            qw,qx,qy,qz = struct.unpack('<4d', f.read(32))
+            tx,ty,tz = struct.unpack('<3d', f.read(24))
+            cam_id = struct.unpack('<i', f.read(4))[0]
+            name = b''
+            while True:
+                c = f.read(1)
+                if c == b'\\x00': break
+                name += c
+            npts = struct.unpack('<Q', f.read(8))[0]
+            f.read(npts * 24)  # skip point2D data
+
+            # Build viewmat
+            R = np.array([
+                [1-2*(qy*qy+qz*qz), 2*(qx*qy-qz*qw), 2*(qx*qz+qy*qw)],
+                [2*(qx*qy+qz*qw), 1-2*(qx*qx+qz*qz), 2*(qy*qz-qx*qw)],
+                [2*(qx*qz-qy*qw), 2*(qy*qz+qx*qw), 1-2*(qx*qx+qy*qy)]])
+            t = np.array([tx,ty,tz])
+            vm = np.eye(4)
+            vm[:3,:3] = R; vm[:3,3] = t
+            viewmat = torch.tensor(vm, dtype=torch.float32, device='cuda')
+
+            depth, rgb, alpha = render_gsplat(gs, viewmat, K, w, h)
+
+            # Save RGB render
+            rgb_img = Image.fromarray((np.clip(rgb,0,1)*255).astype(np.uint8))
+            rgb_img.save(str(preview_dir / f'preview_02_render_view{idx:02d}.jpg'), quality=90)
+
+            # Save depth colormap
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(1, 1, figsize=(w/100, h/100), dpi=100)
+            valid = depth[alpha > 0.5]
+            vmin, vmax = (valid.min(), valid.max()) if len(valid) > 0 else (0, 1)
+            ax.imshow(depth, cmap='turbo', vmin=vmin, vmax=vmax)
+            ax.axis('off')
+            fig.savefig(str(preview_dir / f'preview_03_depth_view{idx:02d}.jpg'), bbox_inches='tight', pad_inches=0, dpi=100)
+            plt.close(fig)
+
+        print(f'Saved {min(nimgs,8)} viewpoint-matched RGB renders + depth maps')
+else:
+    print('No COLMAP sparse data found, skipping viewpoint renders')
 "
 
-# After mesh: render the mesh in Blender
+# 3. After mesh: render in Blender
 blender --background --factory-startup --python-expr "
 import bpy, mathutils
 bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete()
 bpy.ops.wm.obj_import(filepath='$JOB_DIR/objects/meshes/full_scene/full_scene.obj')
+for obj in bpy.data.objects:
+    if obj.type == 'MESH':
+        mat = bpy.data.materials.new(name='Viz'); mat.diffuse_color = (0.4, 0.6, 0.8, 1.0); obj.data.materials.append(mat)
 bpy.ops.object.camera_add(location=(10,-10,8))
 cam=bpy.context.active_object
 cam.rotation_euler=(mathutils.Vector((0,0,2))-cam.location).to_track_quat('-Z','Y').to_euler()
@@ -377,8 +444,11 @@ bpy.context.scene.cycles.device='CPU'
 bpy.context.scene.cycles.samples=32
 bpy.context.scene.render.resolution_x=1280
 bpy.context.scene.render.resolution_y=720
-bpy.context.scene.render.filepath='$JOB_DIR/preview_mesh.jpg'
+bpy.context.scene.render.filepath='$JOB_DIR/previews/preview_04_mesh.jpg'
 bpy.context.scene.render.image_settings.file_format='JPEG'
 bpy.ops.render.render(write_still=True)
 "
 ```
+
+**The most important previews are the viewpoint-matched RGB renders and depth maps.**
+These show the user exactly what the trained model looks like from the original camera positions.
