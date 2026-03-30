@@ -1190,32 +1190,36 @@ class PipelineStages:
                 vc = len(mesh.vertices)
                 logger.info("gsplat mesh for '%s': %d verts", label, vc)
 
-                # Bake texture from gsplat color renders
+                # Bake texture from vertex colors (TSDF already fuses color)
+                # The vertex-colored GLB is already saved above as fallback.
+                # Texture baking adds UV atlas + diffuse map (higher quality).
                 texture_path = obj_dir / f"{label}_diffuse.png"
                 try:
+                    import signal
+
+                    def _bake_timeout(signum, frame):
+                        raise TimeoutError("Texture baking exceeded 120s limit")
+
                     from pipeline.texture_baker import TextureBaker, BakeConfig
                     baker = TextureBaker(config=BakeConfig(texture_size=2048))
-                    # Convert cameras to numpy poses for the baker
-                    cam_poses = []
-                    for viewmat, K in cameras[:len(color_images)]:
-                        # Baker expects camera-to-world (inverse of viewmat)
-                        vm_np = viewmat.cpu().numpy()
-                        cam_to_world = np.linalg.inv(vm_np)
-                        cam_poses.append(cam_to_world)
-                    color_uint8 = [
-                        np.clip(img * 255, 0, 255).astype(np.uint8) for img in color_images
-                    ]
-                    textured_mesh, tex_path = baker.bake(
-                        mesh,
-                        output_texture_path=str(texture_path),
-                        color_images=color_uint8,
-                        camera_poses=cam_poses,
-                    )
-                    textured_mesh.export(str(mesh_glb_path))
-                    textured_mesh.export(str(mesh_obj_path))
-                    logger.info("Baked texture for '%s': %s", label, tex_path)
+                    old_handler = signal.signal(signal.SIGALRM, _bake_timeout)
+                    signal.alarm(120)  # 2 minute timeout
+                    try:
+                        textured_mesh, tex_path = baker.bake_from_vertex_colors(
+                            mesh,
+                            output_texture_path=str(texture_path),
+                        )
+                        signal.alarm(0)
+                        textured_mesh.export(str(mesh_glb_path))
+                        textured_mesh.export(str(mesh_obj_path))
+                        logger.info("Baked texture for '%s': %s", label, tex_path)
+                    except TimeoutError:
+                        signal.alarm(0)
+                        logger.warning("Texture baking timed out for '%s', keeping vertex-colored mesh", label)
+                    finally:
+                        signal.signal(signal.SIGALRM, old_handler)
                 except Exception as tex_exc:
-                    logger.warning("Texture baking failed for '%s': %s", label, tex_exc)
+                    logger.warning("Texture baking failed for '%s': %s (vertex-colored mesh retained)", label, tex_exc)
 
                 return {
                     "label": label, "mesh": str(mesh_glb_path), "mesh_obj": str(mesh_obj_path),
