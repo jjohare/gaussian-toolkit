@@ -856,9 +856,10 @@ class MeshExtractor:
         vol_max = p95 + padding
         vol_extent = vol_max - vol_min
 
-        # Adaptive voxel size: aim for ~256-384 voxels per axis max
+        # Adaptive voxel size: aim for ~128-192 voxels per axis max
+        # (300^3 = 27M voxels is too slow for pure-numpy TSDF integration)
         max_dim = vol_extent.max()
-        voxel_size = max(max_dim / 300.0, 0.002)
+        voxel_size = max(max_dim / 150.0, 0.01)
         sdf_trunc = voxel_size * 5.0
 
         tsdf_config = TSDFConfig(
