@@ -1217,29 +1217,11 @@ class PipelineStages:
 
                 # Bake texture from vertex colors (TSDF already fuses color)
                 # The vertex-colored GLB is already saved above as fallback.
-                # Texture baking adds UV atlas + diffuse map (higher quality).
-                texture_path = obj_dir / f"{label}_diffuse.png"
-                try:
-                    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
-                    from pipeline.texture_baker import TextureBaker, BakeConfig
-                    baker = TextureBaker(config=BakeConfig(texture_size=2048))
-
-                    with ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(
-                            baker.bake_from_vertex_colors,
-                            mesh,
-                            output_texture_path=str(texture_path),
-                        )
-                        try:
-                            textured_mesh, tex_path = future.result(timeout=120)
-                            textured_mesh.export(str(mesh_glb_path))
-                            textured_mesh.export(str(mesh_obj_path))
-                            logger.info("Baked texture for '%s': %s", label, tex_path)
-                        except FuturesTimeout:
-                            logger.warning("Texture baking timed out for '%s', keeping vertex-colored mesh", label)
-                            future.cancel()
-                except Exception as tex_exc:
-                    logger.warning("Texture baking failed for '%s': %s (vertex-colored mesh retained)", label, tex_exc)
+                # Skip texture baking for now — xatlas + CPU rasterization takes 30+ min
+                # and Python threads/futures can't be interrupted. The vertex-colored
+                # GLB is already exported above. Texture baking will be re-enabled
+                # when GPU rasterization (nvdiffrast) is available.
+                logger.info("Skipping texture bake for '%s' (vertex-colored mesh exported)", label)
 
                 return {
                     "label": label, "mesh": str(mesh_glb_path), "mesh_obj": str(mesh_obj_path),
