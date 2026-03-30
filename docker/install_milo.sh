@@ -10,7 +10,10 @@ if ! command -v conda &> /dev/null; then
     bash /tmp/miniconda.sh -b -p /opt/miniconda
     rm /tmp/miniconda.sh
     export PATH="/opt/miniconda/bin:$PATH"
-    conda init bash
+    conda init bash 2>/dev/null || true
+    # Accept TOS (required since conda 25.x)
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main 2>/dev/null || true
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r 2>/dev/null || true
 fi
 
 # Ensure conda is on PATH
