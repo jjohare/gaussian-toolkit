@@ -143,129 +143,167 @@ If training fails or quality is poor, adjust `iterations` or try `strategy="mcmc
 
 **DO NOT STOP HERE. Continue to segmentation.**
 
+
 ---
 
-## Step 6: Segment (SAM3 object detection)
+## Step 6: SAM3 Object Identification
 
-SAM3 requires the BPE vocab file. It is located at:
-`/opt/sam3-repo/sam3/assets/bpe_simple_vocab_16e6.txt.gz`
-
-The environment variable `SAM3_BPE_PATH` points to it. If SAM3 fails, the pipeline
-will fall back to SAM2 automatic mask generation.
+SAM3 identifies freestanding objects using text prompts. HF_TOKEN is set for model download.
+First run downloads ~2.4GB checkpoint (cached in /opt/hf-cache afterward).
 
 ```bash
 python3 -c "
-import os
-os.environ.setdefault('SAM3_BPE_PATH', '/opt/sam3-repo/sam3/assets/bpe_simple_vocab_16e6.txt.gz')
 from pipeline.stages import PipelineStages
 p = PipelineStages('/data/output/JOB_ID')
 result = p.segment(
-    '/data/output/JOB_ID/model/point_cloud.ply',
-    '/data/output/JOB_ID/frames/'
+    '/data/output/JOB_ID/model/splat_30000.ply',
+    '/data/output/JOB_ID/frames_selected/'
 )
 print(result)
 "
 ```
 
-```bash
-curl -X POST http://localhost:7860/api/job/JOB_ID/stage \
-  -H 'Content-Type: application/json' \
-  -d '{"stage": "segment", "progress": 0.65, "message": "Segmentation complete: N objects"}'
-```
-
----
-
-## Step 7: Extract per-object PLY files
-
-```bash
-python3 -c "
-from pipeline.stages import PipelineStages
-import json
-p = PipelineStages('/data/output/JOB_ID')
-# Use the objects JSON from segment() result
-objects = [{'label': 'full_scene', 'count': -1}]
-result = p.extract_objects('/data/output/JOB_ID/model/point_cloud.ply', objects)
-print(result)
-"
-```
+**INSPECT THE RESULTS.** Check: how many objects? What labels? Gaussian counts per object?
+If SAM3 fell back to full_scene only, check HF_TOKEN, model download, BPE path.
 
 ```bash
 curl -X POST http://localhost:7860/api/job/JOB_ID/stage \
   -H 'Content-Type: application/json' \
-  -d '{"stage": "extract_objects", "progress": 0.7, "message": "Extracted N object PLYs"}'
+  -d '{"stage": "segment", "progress": 0.55, "message": "SAM3: N objects identified"}'
 ```
 
 ---
 
-## Step 8: Generate meshes (TSDF fusion)
+## Step 7: Per-Object Processing Loop
 
-Use TSDF fusion for mesh extraction. This produces watertight meshes with good topology.
+**For EACH identified object, run this sub-pipeline. You are iterating.**
 
+### 7a: Extract per-object gaussian PLY
 ```bash
 python3 -c "
 from pipeline.stages import PipelineStages
-import json
 p = PipelineStages('/data/output/JOB_ID')
-plys = ['/data/output/JOB_ID/objects/full_scene.ply']
-result = p.mesh_objects(plys)
+result = p.extract_objects('/data/output/JOB_ID/model/splat_30000.ply', OBJECTS_FROM_STEP6)
 print(result)
 "
 ```
 
-**Inspect in Blender**:
+### 7b: Render object views with gsplat (orbit cameras -- correct for isolated objects)
 ```bash
-DISPLAY=:1 blender /data/output/JOB_ID/objects/meshes/full_scene/full_scene.glb
+python3 -c "
+import sys; sys.path.insert(0, 'src')
+from pipeline.mesh_extractor import load_3dgs_ply, render_gsplat, generate_orbit_cameras_gsplat
+import numpy as np
+from PIL import Image
+
+gs = load_3dgs_ply('/data/output/JOB_ID/objects/OBJECT_LABEL.ply')
+cameras = generate_orbit_cameras_gsplat(gs['means'], 4, 1024)
+for i, (vm, K) in enumerate(cameras):
+    depth, rgb, alpha = render_gsplat(gs, vm, K, 1024, 1024)
+    Image.fromarray((np.clip(rgb,0,1)*255).astype(np.uint8)).save(
+        f'/data/output/JOB_ID/objects/OBJECT_LABEL_view{i}.png')
+print('Saved 4 orbit views')
+"
+```
+
+### 7c: (Optional) Hunyuan Multi-View enhancement via ComfyUI
+Submit the best render to ComfyUI Hunyuan MV workflow for consistent multi-view generation:
+```bash
+curl -s http://localhost:8188/prompt -X POST \
+  -H 'Content-Type: application/json' \
+  -d @/data/output/JOB_ID/workflows/hunyuan_mv_OBJECT.json
+```
+
+### 7d: Create mesh per object (orbit cameras for isolated objects)
+```bash
+python3 -c "
+from pipeline.stages import PipelineStages
+p = PipelineStages('/data/output/JOB_ID')
+result = p.mesh_objects(['/data/output/JOB_ID/objects/OBJECT_LABEL.ply'])
+print(result)
+"
+```
+
+### 7e: Save object metadata (position, bbox, label, mesh path)
+```bash
+python3 -c "
+import json, numpy as np
+from plyfile import PlyData
+ply = PlyData.read('/data/output/JOB_ID/objects/OBJECT_LABEL.ply')
+v = ply['vertex']
+meta = {
+    'label': 'OBJECT_LABEL',
+    'position': [float(np.mean(v['x'])), float(np.mean(v['y'])), float(np.mean(v['z']))],
+    'bbox_min': [float(np.min(v['x'])), float(np.min(v['y'])), float(np.min(v['z']))],
+    'bbox_max': [float(np.max(v['x'])), float(np.max(v['y'])), float(np.max(v['z']))],
+    'gaussian_count': len(v),
+    'mesh': '/data/output/JOB_ID/objects/meshes/OBJECT_LABEL/OBJECT_LABEL.glb',
+}
+json.dump(meta, open('/data/output/JOB_ID/objects/OBJECT_LABEL_meta.json', 'w'), indent=2)
+print(json.dumps(meta, indent=2))
+"
+```
+
+Report per-object progress:
+```bash
+curl -X POST http://localhost:7860/api/job/JOB_ID/stage \
+  -H 'Content-Type: application/json' \
+  -d '{"stage": "mesh_objects", "progress": 0.7, "message": "Object N/M: LABEL"}'
+```
+
+---
+
+## Step 8: Build Empty Room
+
+Remove identified objects from frames using inpainting, reconstruct clean room.
+
+### 8a: Inpaint objects out of frames
+Use SAM3 object masks + ComfyUI FLUX inpainting to remove objects from frames.
+The inpainted frames go to `frames_inpainted/`.
+
+### 8b: Reconstruct empty room
+Re-run COLMAP + 3DGS training on inpainted frames. Reuse camera poses from step 4.
+
+### 8c: Extract room mesh
+Room mesh uses **COLMAP cameras** (interior scene), not orbit cameras.
+
+---
+
+## Step 9: Assemble Scene in Blender
+
+The Blender assembler combines room mesh + object meshes at their original positions.
+It bakes vertex colors to UV textures in 0.5s using Cycles GPU.
+
+```bash
+blender --background --python src/pipeline/blender_assembler.py -- \
+    --input /data/output/JOB_ID/objects/meshes/full_scene/full_scene.glb \
+    --output-usd /data/output/JOB_ID/usd/scene.usda \
+    --output-renders /data/output/JOB_ID/previews/ \
+    --render-size 1920x1080
+```
+
+For multi-object scenes, write a custom Blender script to import each object at position:
+```python
+import bpy, json
+from pathlib import Path
+JOB = '/data/output/JOB_ID'
+for meta_file in sorted(Path(f'{JOB}/objects').glob('*_meta.json')):
+    meta = json.load(open(meta_file))
+    bpy.ops.import_scene.gltf(filepath=meta['mesh'])
+    obj = bpy.context.selected_objects[0]
+    obj.location = meta['position']
+    obj.name = meta['label']
 ```
 
 ```bash
 curl -X POST http://localhost:7860/api/job/JOB_ID/stage \
   -H 'Content-Type: application/json' \
-  -d '{"stage": "mesh_objects", "progress": 0.8, "message": "Mesh: Nk verts, Mk faces"}'
+  -d '{"stage": "assemble_usd", "progress": 0.95, "message": "Scene: room + N objects"}'
 ```
 
 ---
 
-## Step 9: Texture bake (optional)
-
-```bash
-python3 -c "
-from pipeline.stages import PipelineStages
-import json
-p = PipelineStages('/data/output/JOB_ID')
-meshes = json.load(open('/data/output/JOB_ID/objects/meshes/mesh_manifest.json'))
-result = p.texture_bake(meshes)
-print(result)
-"
-```
-
----
-
-## Step 10: Assemble USD scene
-
-This is the final assembly step. Creates the hierarchical scene graph with variant sets.
-
-```bash
-python3 -c "
-from pipeline.stages import PipelineStages
-import json
-p = PipelineStages('/data/output/JOB_ID')
-meshes = json.load(open('/data/output/JOB_ID/objects/meshes/mesh_manifest.json'))
-result = p.assemble_usd(meshes)
-print(result)
-"
-```
-
-```bash
-curl -X POST http://localhost:7860/api/job/JOB_ID/stage \
-  -H 'Content-Type: application/json' \
-  -d '{"stage": "assemble_usd", "progress": 0.95, "message": "USD scene assembled: N prims"}'
-```
-
----
-
-## Step 11: Validate
-
-Run final validation across all outputs.
+## Step 10: Validate and Complete
 
 ```bash
 python3 -c "
@@ -274,181 +312,56 @@ p = PipelineStages('/data/output/JOB_ID')
 result = p.validate()
 print(result)
 "
-```
-
----
-
-## Mark job complete
-
-```bash
 curl -X POST http://localhost:7860/api/job/JOB_ID/complete \
   -H 'Content-Type: application/json' \
   -d '{"success": true}'
 ```
 
-```bash
-curl -X POST http://localhost:7860/api/job/JOB_ID/stage \
-  -H 'Content-Type: application/json' \
-  -d '{"stage": "validate", "progress": 1.0, "message": "Pipeline complete"}'
-```
-
 ---
 
-## At each step: CHECK QUALITY
+## Orchestration Rules
 
-- Render a preview in Blender: `DISPLAY=:1 blender --background --python-expr "..."`
-- If quality is poor, adjust parameters and re-run the stage
-- The pipeline is not a script -- YOU decide what to do next
-- You can skip stages, re-run stages, or change parameters between stages
+### YOU ARE THE ORCHESTRATOR. Not a script runner.
 
-## Quality Targets
+1. **Inspect results between every step.** Check vertex counts, image quality, file sizes.
+2. **If SAM3 finds objects**: Run the per-object loop (7a-7e) for EACH object.
+3. **If SAM3 falls back to full_scene only**: Mesh the full scene, skip object loop.
+4. **If quality is poor**: Re-run the stage with different parameters.
+5. **Orbit cameras for isolated objects**, COLMAP cameras for full scenes/rooms.
+6. **Save preview images at every stage** for the web carousel.
+7. **Report progress via REST API** at each stage transition.
+8. **Blender assembler bakes textures in 0.5s** via Cycles GPU -- always use it for final output.
 
-- Frame selection: 60-80 diverse frames from 4fps extraction
-- COLMAP: 70%+ registration rate, use sequential matcher for video
-- Training: 30k+ iterations, MRNF strategy, loss < 0.02
-- Segmentation: SAM3 text prompts for semantic labels (fallback to SAM2 if BPE missing)
-- Mesh: per-object textured meshes via TSDF fusion
-- USD: hierarchical scene graph with variant sets
+### Quality Targets
 
-## Key Environment Variables
+| Stage | Target | Fail if |
+|-------|--------|---------|
+| COLMAP | >70% registration | <30% |
+| Training | >10MB PLY, loss <0.02 | <1MB PLY |
+| SAM3 | 2+ objects identified | (fallback to full_scene is OK) |
+| Per-object mesh | >5K verts per object | <500 verts |
+| Room mesh | >30K verts | <5K verts |
+| Final USD | Room + objects with materials | Empty scene |
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `SAM3_BPE_PATH` | `/opt/sam3-repo/sam3/assets/bpe_simple_vocab_16e6.txt.gz` | SAM3 text tokenizer vocab |
-| `HF_TOKEN` | (from compose) | HuggingFace model downloads |
-| `ANTHROPIC_API_KEY` | (from compose) | Claude Code API key |
+### Key Environment Variables
 
-## REST API for progress reporting
+| Variable | Value | Purpose |
+|----------|-------|---------|
+| `SAM3_BPE_PATH` | `/opt/sam3-repo/sam3/assets/bpe_simple_vocab_16e6.txt.gz` | SAM3 text tokenizer |
+| `HF_TOKEN` | (from .env) | HuggingFace model downloads |
+| `HF_HOME` | `/opt/hf-cache` | Shared HF cache directory |
 
-| Method | Endpoint | Body | Purpose |
-|--------|----------|------|---------|
-| POST | `/api/job/<id>/stage` | `{"stage": "...", "progress": 0.5, "message": "..."}` | Report stage progress |
-| POST | `/api/job/<id>/stage/complete` | `{"stage": "...", "success": true}` | Mark stage done |
-| POST | `/api/job/<id>/complete` | `{"success": true}` | Mark job done |
-| GET | `/jobs` | -- | List all jobs |
-| GET | `/status/<id>` | -- | Job detail |
-| GET | `/api/job/<id>/previews` | -- | List preview images |
+### REST API
 
-## IMPORTANT: Save preview images at each stage
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/api/job/<id>/stage` | Report stage progress |
+| POST | `/api/job/<id>/stage/complete` | Mark stage done |
+| POST | `/api/job/<id>/complete` | Mark job done |
+| GET | `/status/<id>` | Job detail |
+| GET | `/api/job/<id>/previews` | List preview images |
 
-The web UI has an image carousel that displays previews. **You MUST save preview images
-during the pipeline so the user can monitor progress visually.** Save as PNG/JPG to the
-job output directory. The carousel auto-refreshes every 30 seconds.
+### MANDATORY: Save preview images
 
-### MANDATORY previews (save these or the user cannot monitor progress):
-
-After EACH stage below, save the specified preview images. The web carousel at
-http://localhost:7860 auto-detects any PNG/JPG in the job output directory.
-
-```bash
-JOB_DIR=/data/output/JOB_ID
-
-# 1. After frame extraction: sample frames
-cp $JOB_DIR/frames/frame_00001.jpg $JOB_DIR/preview_01_frame_sample.jpg
-
-# 2. After training: render RGB from COLMAP camera viewpoints using gsplat
-python3 -c "
-import sys, os; sys.path.insert(0, 'src')
-from pipeline.mesh_extractor import load_3dgs_ply, render_gsplat
-from pipeline.colmap_parser import parse_cameras_bin, parse_images_bin
-import torch, numpy as np
-from PIL import Image
-from pathlib import Path
-
-JOB = '$JOB_DIR'
-ply = sorted(Path(f'{JOB}/model').glob('*.ply'))[-1]
-gs = load_3dgs_ply(str(ply))
-
-# Load COLMAP cameras for viewpoint-matched renders
-sparse = Path(f'{JOB}/colmap/undistorted/sparse/0')
-if sparse.exists():
-    import struct
-    # Parse binary cameras for intrinsics
-    with open(sparse / 'cameras.bin', 'rb') as f:
-        n = struct.unpack('<Q', f.read(8))[0]
-        for _ in range(n):
-            cid, model, w, h = struct.unpack('<iiii', f.read(16))
-            nparams = {0:3,1:4,2:4,3:5,4:4,5:5,6:12,7:8,8:12,9:8}.get(model,4)
-            params = struct.unpack(f'<{nparams}d', f.read(8*nparams))
-            focal = params[0]
-            break  # Use first camera
-    K = torch.tensor([[focal,0,w/2],[0,focal,h/2],[0,0,1]], dtype=torch.float32, device='cuda')
-
-    # Parse binary images for extrinsics (first 8)
-    with open(sparse / 'images.bin', 'rb') as f:
-        nimgs = struct.unpack('<Q', f.read(8))[0]
-        preview_dir = Path(f'{JOB}/previews')
-        preview_dir.mkdir(exist_ok=True)
-        for idx in range(min(nimgs, 8)):
-            img_id = struct.unpack('<i', f.read(4))[0]
-            qw,qx,qy,qz = struct.unpack('<4d', f.read(32))
-            tx,ty,tz = struct.unpack('<3d', f.read(24))
-            cam_id = struct.unpack('<i', f.read(4))[0]
-            name = b''
-            while True:
-                c = f.read(1)
-                if c == b'\\x00': break
-                name += c
-            npts = struct.unpack('<Q', f.read(8))[0]
-            f.read(npts * 24)  # skip point2D data
-
-            # Build viewmat
-            R = np.array([
-                [1-2*(qy*qy+qz*qz), 2*(qx*qy-qz*qw), 2*(qx*qz+qy*qw)],
-                [2*(qx*qy+qz*qw), 1-2*(qx*qx+qz*qz), 2*(qy*qz-qx*qw)],
-                [2*(qx*qz-qy*qw), 2*(qy*qz+qx*qw), 1-2*(qx*qx+qy*qy)]])
-            t = np.array([tx,ty,tz])
-            vm = np.eye(4)
-            vm[:3,:3] = R; vm[:3,3] = t
-            viewmat = torch.tensor(vm, dtype=torch.float32, device='cuda')
-
-            depth, rgb, alpha = render_gsplat(gs, viewmat, K, w, h)
-
-            # Save RGB render
-            rgb_img = Image.fromarray((np.clip(rgb,0,1)*255).astype(np.uint8))
-            rgb_img.save(str(preview_dir / f'preview_02_render_view{idx:02d}.jpg'), quality=90)
-
-            # Save depth colormap
-            import matplotlib
-            matplotlib.use('Agg')
-            import matplotlib.pyplot as plt
-            fig, ax = plt.subplots(1, 1, figsize=(w/100, h/100), dpi=100)
-            valid = depth[alpha > 0.5]
-            vmin, vmax = (valid.min(), valid.max()) if len(valid) > 0 else (0, 1)
-            ax.imshow(depth, cmap='turbo', vmin=vmin, vmax=vmax)
-            ax.axis('off')
-            fig.savefig(str(preview_dir / f'preview_03_depth_view{idx:02d}.jpg'), bbox_inches='tight', pad_inches=0, dpi=100)
-            plt.close(fig)
-
-        print(f'Saved {min(nimgs,8)} viewpoint-matched RGB renders + depth maps')
-else:
-    print('No COLMAP sparse data found, skipping viewpoint renders')
-"
-
-# 3. After mesh: render in Blender
-blender --background --factory-startup --python-expr "
-import bpy, mathutils
-bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete()
-bpy.ops.wm.obj_import(filepath='$JOB_DIR/objects/meshes/full_scene/full_scene.obj')
-for obj in bpy.data.objects:
-    if obj.type == 'MESH':
-        mat = bpy.data.materials.new(name='Viz'); mat.diffuse_color = (0.4, 0.6, 0.8, 1.0); obj.data.materials.append(mat)
-bpy.ops.object.camera_add(location=(10,-10,8))
-cam=bpy.context.active_object
-cam.rotation_euler=(mathutils.Vector((0,0,2))-cam.location).to_track_quat('-Z','Y').to_euler()
-bpy.context.scene.camera=cam
-bpy.ops.object.light_add(type='SUN',location=(5,-5,10))
-bpy.context.active_object.data.energy=2.5
-bpy.context.scene.render.engine='CYCLES'
-bpy.context.scene.cycles.device='CPU'
-bpy.context.scene.cycles.samples=32
-bpy.context.scene.render.resolution_x=1280
-bpy.context.scene.render.resolution_y=720
-bpy.context.scene.render.filepath='$JOB_DIR/previews/preview_04_mesh.jpg'
-bpy.context.scene.render.image_settings.file_format='JPEG'
-bpy.ops.render.render(write_still=True)
-"
-```
-
-**The most important previews are the viewpoint-matched RGB renders and depth maps.**
-These show the user exactly what the trained model looks like from the original camera positions.
+The web UI carousel auto-detects PNG/JPG in the job output directory.
+Save previews at: frame selection, training renders, depth maps, mesh renders, final scene.
