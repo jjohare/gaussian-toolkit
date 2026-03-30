@@ -3,66 +3,183 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>3D Viewer — {{ filename }}</title>
+  <title>3D Scene -- {{ filename }}</title>
   <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
-      theme: { extend: { colors: { lf: { bg: '#0f1117', surface: '#1a1d27', border: '#2a2d3a', accent: '#6366f1', text: '#e2e8f0', muted: '#94a3b8' } } } }
+      theme: { extend: { colors: { lf: {
+        bg: '#0f1117', surface: '#1a1d27', border: '#2a2d3a',
+        accent: '#6366f1', 'accent-light': '#818cf8',
+        text: '#e2e8f0', muted: '#94a3b8',
+        success: '#22c55e'
+      }}}}
     }
   </script>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+    body { font-family: 'Inter', sans-serif; }
     model-viewer {
       width: 100%;
-      height: calc(100vh - 64px);
+      height: 100%;
       --poster-color: #0f1117;
     }
-    model-viewer::part(default-progress-bar) {
-      background: #6366f1;
-    }
+    model-viewer::part(default-progress-bar) { background: #6366f1; }
+    .preview-thumb { transition: all 0.2s; }
+    .preview-thumb:hover { transform: scale(1.05); box-shadow: 0 0 0 2px #6366f1; }
+    .preview-thumb.active { box-shadow: 0 0 0 2px #6366f1; }
   </style>
 </head>
-<body class="h-full bg-lf-bg text-lf-text">
-  <header class="border-b border-lf-border px-6 py-4 flex items-center justify-between h-16">
-    <div class="flex items-center gap-3">
-      <a href="/" class="text-lf-muted hover:text-lf-text transition">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
-        </svg>
-      </a>
-      <h1 class="text-lg font-semibold">3D Scene Viewer</h1>
-      <span class="text-xs text-lf-muted bg-lf-surface px-2 py-0.5 rounded">{{ filename }}</span>
-    </div>
-    <div class="flex items-center gap-3">
-      <a href="/download/{{ job_id }}" class="px-4 py-2 bg-lf-surface border border-lf-border text-sm rounded-lg hover:bg-lf-border transition flex items-center gap-2">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-        </svg>
-        Download ZIP
-      </a>
-    </div>
-  </header>
+<body class="h-full bg-lf-bg text-lf-text overflow-hidden">
+  <div class="h-full flex flex-col">
+    <!-- Header -->
+    <header class="border-b border-lf-border px-6 py-3 flex items-center justify-between flex-shrink-0">
+      <div class="flex items-center gap-3">
+        <a href="/" class="text-lf-muted hover:text-lf-text transition">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+          </svg>
+        </a>
+        <div class="w-7 h-7 rounded bg-lf-accent flex items-center justify-center">
+          <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-8 4.5M20 7v10l-8 4.5M20 7L12 2.5 4 7m8 4.5L4 7m8 4.5V17m8-9.5v10l-8 4.5M4 7v10l8 4.5"/>
+          </svg>
+        </div>
+        <h1 class="text-sm font-semibold">{{ filename }}</h1>
+        <span id="mesh-info" class="text-xs text-lf-muted bg-lf-surface px-2 py-0.5 rounded"></span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="resetCamera()" class="px-3 py-1.5 text-xs bg-lf-surface border border-lf-border rounded hover:bg-lf-border transition" title="Reset camera">Reset</button>
+        <button onclick="toggleWireframe()" id="wire-btn" class="px-3 py-1.5 text-xs bg-lf-surface border border-lf-border rounded hover:bg-lf-border transition" title="Toggle wireframe">Wireframe</button>
+        <a href="/download/{{ job_id }}" class="px-3 py-1.5 text-xs bg-lf-accent text-white rounded hover:bg-lf-accent-light transition">Download ZIP</a>
+      </div>
+    </header>
 
-  <model-viewer
-    src="/mesh/{{ job_id }}"
-    alt="3D scene reconstruction from {{ filename }}"
-    auto-rotate
-    camera-controls
-    shadow-intensity="1"
-    environment-image="neutral"
-    exposure="1.2"
-    loading="eager"
-    reveal="auto"
-  >
-    <div slot="progress-bar" class="absolute bottom-0 left-0 right-0 h-1 bg-lf-surface">
-      <div class="h-full bg-lf-accent transition-all" id="progress"></div>
+    <!-- Main content: 3D viewer + preview strip -->
+    <div class="flex-1 flex flex-col min-h-0">
+      <!-- 3D Viewer -->
+      <div class="flex-1 relative">
+        <model-viewer
+          id="viewer"
+          src="/mesh/{{ job_id }}"
+          alt="3D reconstruction of {{ filename }}"
+          camera-controls
+          auto-rotate
+          auto-rotate-delay="3000"
+          rotation-per-second="15deg"
+          shadow-intensity="0.8"
+          shadow-softness="0.5"
+          environment-image="neutral"
+          exposure="1.0"
+          tone-mapping="commerce"
+          loading="eager"
+          reveal="auto"
+          interpolation-decay="100"
+          min-camera-orbit="auto auto 0.5m"
+          touch-action="pan-y"
+        >
+          <!-- Loading indicator -->
+          <div slot="poster" class="absolute inset-0 flex items-center justify-center bg-lf-bg">
+            <div class="text-center">
+              <div class="w-10 h-10 border-2 border-lf-accent border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+              <p class="text-sm text-lf-muted">Loading 3D scene...</p>
+            </div>
+          </div>
+          <!-- Progress bar -->
+          <div slot="progress-bar" class="absolute bottom-0 left-0 right-0 h-1 bg-lf-surface">
+            <div class="h-full bg-lf-accent transition-all" id="progress"></div>
+          </div>
+        </model-viewer>
+
+        <!-- Floating info panel -->
+        <div class="absolute top-3 right-3 bg-lf-surface/90 backdrop-blur border border-lf-border rounded-lg px-3 py-2 text-xs text-lf-muted">
+          <div id="camera-info">Drag to orbit, scroll to zoom</div>
+        </div>
+      </div>
+
+      <!-- Preview image strip -->
+      <div id="preview-strip" class="border-t border-lf-border bg-lf-surface px-4 py-3 flex-shrink-0 hidden">
+        <div class="flex gap-2 overflow-x-auto scrollbar-thin pb-1" id="preview-list">
+          <!-- Populated by JS -->
+        </div>
+      </div>
     </div>
-  </model-viewer>
+
+    <!-- Lightbox overlay for preview images -->
+    <div id="lightbox" class="fixed inset-0 bg-black/80 z-50 hidden items-center justify-center cursor-pointer" onclick="closeLightbox()">
+      <img id="lightbox-img" class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl" src="" alt="Preview">
+      <button class="absolute top-4 right-4 text-white/80 hover:text-white text-2xl">&times;</button>
+    </div>
+  </div>
 
   <script>
-    const viewer = document.querySelector('model-viewer');
+    const viewer = document.querySelector('#viewer');
+    const jobId = '{{ job_id }}';
+
+    // Progress tracking
     viewer.addEventListener('progress', (e) => {
       document.getElementById('progress').style.width = `${e.detail.totalProgress * 100}%`;
+    });
+
+    // Show mesh info when loaded
+    viewer.addEventListener('load', () => {
+      document.getElementById('progress').style.display = 'none';
+      // model-viewer doesn't expose vertex count, but we can show it loaded
+      document.getElementById('mesh-info').textContent = 'Loaded';
+    });
+
+    // Reset camera
+    function resetCamera() {
+      viewer.cameraOrbit = 'auto auto auto';
+      viewer.cameraTarget = 'auto auto auto';
+      viewer.fieldOfView = 'auto';
+    }
+
+    // Wireframe toggle (via custom CSS on model-viewer)
+    let wireframe = false;
+    function toggleWireframe() {
+      wireframe = !wireframe;
+      const btn = document.getElementById('wire-btn');
+      if (wireframe) {
+        viewer.style.setProperty('--poster-color', '#1a1d27');
+        btn.classList.add('bg-lf-accent', 'text-white', 'border-lf-accent');
+      } else {
+        btn.classList.remove('bg-lf-accent', 'text-white', 'border-lf-accent');
+      }
+    }
+
+    // Load preview images
+    fetch(`/api/job/${jobId}/previews`)
+      .then(r => r.json())
+      .then(previews => {
+        if (!previews || previews.length === 0) return;
+        const strip = document.getElementById('preview-strip');
+        const list = document.getElementById('preview-list');
+        strip.classList.remove('hidden');
+
+        previews.forEach(p => {
+          const url = `/api/job/${jobId}/file/${p.relative_path}`;
+          const div = document.createElement('div');
+          div.className = 'preview-thumb flex-shrink-0 cursor-pointer rounded-md overflow-hidden border border-lf-border';
+          div.innerHTML = `<img src="${url}" alt="${p.stage}" class="h-16 w-auto object-cover" loading="lazy" title="${p.relative_path}">`;
+          div.onclick = () => openLightbox(url);
+          list.appendChild(div);
+        });
+      })
+      .catch(() => {});
+
+    // Lightbox
+    function openLightbox(url) {
+      document.getElementById('lightbox-img').src = url;
+      document.getElementById('lightbox').classList.remove('hidden');
+      document.getElementById('lightbox').classList.add('flex');
+    }
+    function closeLightbox() {
+      document.getElementById('lightbox').classList.add('hidden');
+      document.getElementById('lightbox').classList.remove('flex');
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeLightbox();
     });
   </script>
 </body>

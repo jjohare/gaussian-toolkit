@@ -342,14 +342,24 @@ def serve_mesh(job_id: str) -> Response:
     if output_dir is None or not output_dir.exists():
         abort(404, description="Output directory not found")
 
-    # Find GLB files
-    glb_files = list(output_dir.glob("objects/meshes/**/*.glb"))
-    if not glb_files:
-        glb_files = list(output_dir.glob("**/*.glb"))
-    if not glb_files:
+    # Prefer Blender-assembled USD GLB (has materials), then raw TSDF GLB
+    glb_candidates = [
+        output_dir / "usd" / "scene.glb",  # Blender export
+    ]
+    # Then look in standard locations
+    glb_candidates += sorted(output_dir.glob("objects/meshes/**/*.glb"))
+    glb_candidates += sorted(output_dir.glob("**/*.glb"))
+
+    glb_file = None
+    for candidate in glb_candidates:
+        if candidate.exists() and candidate.stat().st_size > 0:
+            glb_file = candidate
+            break
+
+    if glb_file is None:
         abort(404, description="No GLB mesh found")
 
-    return send_file(glb_files[0], mimetype="model/gltf-binary")
+    return send_file(str(glb_file), mimetype="model/gltf-binary")
 
 
 @app.route("/preview/<job_id>/<stage>")
