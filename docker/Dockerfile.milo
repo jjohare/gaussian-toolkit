@@ -16,8 +16,9 @@ RUN pip3 install \
     torch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 \
     --index-url https://download.pytorch.org/whl/cu118
 
-# Clone MILo with all submodules
-RUN git clone --recursive https://github.com/Anttwo/MILo.git /opt/milo
+# Clone MILo — force HTTPS for submodules (SSH not available in Docker build)
+RUN git config --global url."https://github.com/".insteadOf "git@github.com:" \
+    && git clone --recursive https://github.com/Anttwo/MILo.git /opt/milo
 
 # Build CUDA extensions
 ENV CUDA_HOME=/usr/local/cuda
