@@ -288,6 +288,11 @@
   {\normalfont\large\bfseries\color{DarkBg}}
   {\textcolor{DreamLabAccent}{\thesubsection}}{1em}{}
 
+\titleformat{\part}[display]
+  {\centering\normalfont\Huge\bfseries\color{DarkBg}}
+  {\textcolor{UoSRed}{\partname\ \thepart}}{10pt}{\huge}
+\titlespacing*{\part}{0pt}{50pt}{40pt}
+
 % ────────────────────────────────────────────────────────────
 % Document metadata
 % ────────────────────────────────────────────────────────────
@@ -417,6 +422,12 @@ The report details the technological foundations, pipeline architecture, experim
 \cleardoublepage
 \pagenumbering{arabic}
 
+% ════════════════════════════════════════════════════════════
+% Part I: Research Report
+% ════════════════════════════════════════════════════════════
+\part{Research Report}
+\label{part:research}
+
 \include{chapters/ch1_introduction}
 \include{chapters/ch2_background}
 \include{chapters/ch3_technology}
@@ -425,6 +436,21 @@ The report details the technological foundations, pipeline architecture, experim
 \include{chapters/ch6_recommendations}
 \include{chapters/ch7_future}
 \include{chapters/ch8_conclusion}
+
+% ════════════════════════════════════════════════════════════
+% Part II: Training Programme
+% ════════════════════════════════════════════════════════════
+\cleardoublepage
+\part{Training Programme}
+\label{part:training}
+
+\include{chapters/ch9_training_overview}
+\include{chapters/ch10_module_capture}
+\include{chapters/ch11_module_processing}
+\include{chapters/ch12_module_viewing}
+\include{chapters/ch13_module_advanced}
+\include{chapters/ch14_module_metadata}
+\include{chapters/ch15_cloud_processing}
 
 % ────────────────────────────────────────────────────────────
 % Back matter
