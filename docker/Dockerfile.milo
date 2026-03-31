@@ -5,11 +5,18 @@ FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Ubuntu 22.04 ships Python 3.10 — use it directly (MILo works with 3.9-3.11)
+# Include Mesa EGL/GL/GLES dev libs for nvdiffrast OpenGL context,
+# ninja-build for torch JIT compilation
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake git wget \
         python3 python3-dev python3-pip \
         libgl1 libglib2.0-0 libcgal-dev libgmp-dev \
+        libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev \
+        ninja-build \
     && rm -rf /var/lib/apt/lists/*
+
+# FindTorch.cmake expects 'python' on PATH
+RUN ln -sf /usr/bin/python3 /usr/bin/python
 
 # Install PyTorch 2.3.1 + CUDA 11.8
 RUN pip3 install \
@@ -25,28 +32,46 @@ ENV CUDA_HOME=/usr/local/cuda
 ENV TORCH_CUDA_ARCH_LIST="8.9"
 
 WORKDIR /opt/milo
+
+# Build ALL 4 rasterizers + simple-knn + fused-ssim
 RUN pip3 install --no-build-isolation submodules/diff-gaussian-rasterization/
+RUN pip3 install --no-build-isolation submodules/diff-gaussian-rasterization_ms/
+RUN pip3 install --no-build-isolation submodules/diff-gaussian-rasterization_gof/
 RUN pip3 install --no-build-isolation submodules/simple-knn/
 RUN pip3 install --no-build-isolation submodules/fused-ssim/
-RUN pip3 install --no-build-isolation git+https://github.com/NVlabs/nvdiffrast
 
-# tetra_triangulation (Delaunay, requires CGAL + pybind11)
+# nvdiffrast — install from LOCAL submodule (git+https installs as "UNKNOWN")
+RUN pip3 install --no-build-isolation submodules/nvdiffrast/
+
+# tetra_triangulation (Delaunay, requires CGAL + pybind11) — non-fatal
 RUN pip3 install pybind11 \
-    && cd submodules/tetra_triangulation && cmake . -Dpybind11_DIR=$(python3 -m pybind11 --cmakedir) \
-    && make -j$(nproc) && pip3 install -e . \
-    || echo "WARNING: tetra_triangulation build failed (non-critical for SDF extraction)"
+    && cd submodules/tetra_triangulation \
+    && cmake . \
+        -DPYTHON_EXECUTABLE=/usr/bin/python3 \
+        -DCMAKE_CXX_FLAGS="-I/usr/local/cuda/include" \
+        -Dpybind11_DIR=$(python3 -m pybind11 --cmakedir) \
+    && make -j$(nproc) \
+    && pip3 install -e . \
+    || true
 
 # Python deps
 RUN pip3 install \
     open3d==0.19.0 trimesh scikit-image opencv-python plyfile tqdm
 
+# PLY-to-GLB export capability for web viewer
+RUN pip3 install pygltflib
+
 # Verify
-RUN python3 -c "\
+RUN python3 -c " \
 import torch; print(f'PyTorch {torch.__version__}, CUDA {torch.cuda.is_available()}'); \
-import diff_gaussian_rasterization; print('rasterizer OK'); \
-import simple_knn; print('knn OK'); \
-from fused_ssim import fused_ssim; print('ssim OK'); \
+import diff_gaussian_rasterization; print('diff-gaussian-rasterization OK'); \
+import simple_knn; print('simple-knn OK'); \
+from fused_ssim import fused_ssim; print('fused-ssim OK'); \
+import nvdiffrast; print(f'nvdiffrast {nvdiffrast.__version__} OK'); \
 print('MILo build verified')"
+# Non-critical rasterizer variants (may not exist in all MILo versions)
+RUN python3 -c "import diff_gaussian_rasterization_ms; print('diff-gaussian-rasterization_ms OK')" || true
+RUN python3 -c "import diff_gaussian_rasterization_gof; print('diff-gaussian-rasterization_gof OK')" || true
 
 VOLUME ["/data"]
 WORKDIR /opt/milo

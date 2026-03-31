@@ -284,6 +284,17 @@ def run_milo(
     result["ply_path"] = str(ply_path) if ply_path else None
     result["duration"] = total_duration
 
+    # Convert PLY mesh to GLB for the web viewer
+    try:
+        import trimesh
+        mesh = trimesh.load(str(mesh_path), force="mesh")
+        glb_path = mesh_path.with_suffix(".glb")
+        mesh.export(str(glb_path))
+        result["glb_path"] = str(glb_path)
+        logger.info("Converted MILo mesh to GLB: %s (%d verts)", glb_path.name, len(mesh.vertices))
+    except Exception as conv_exc:
+        logger.warning("Failed to convert MILo PLY to GLB: %s", conv_exc)
+
     logger.info(
         "MILo complete: mesh=%s (%d bytes), duration=%.0fs",
         mesh_path.name, mesh_path.stat().st_size, total_duration,

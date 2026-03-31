@@ -20,13 +20,14 @@ services:
       - HF_HOME=/opt/hf-cache
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - SAM3_BPE_PATH=/opt/sam3-repo/sam3/assets/bpe_simple_vocab_16e6.txt.gz
+      - MILO_CONTAINER=milo
 
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              device_ids: ['0']
               capabilities: [gpu, compute, utility, graphics]
         limits:
           memory: 200g
@@ -84,15 +85,13 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ['1']
               capabilities: [gpu, compute, utility]
     volumes:
       - ./output:/data/output
-      - hf-cache:/root/.cache/huggingface
+      - hf-cache:/opt/hf-cache
     entrypoint: ["sleep", "infinity"]
     restart: unless-stopped
-    profiles:
-      - milo
 
 volumes:
   models-data:

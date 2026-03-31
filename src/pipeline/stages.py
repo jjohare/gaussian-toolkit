@@ -707,6 +707,16 @@ class PipelineStages:
         if milo_result["mesh_path"]:
             artifacts["milo_mesh_path"] = milo_result["mesh_path"]
 
+        # Copy MILo mesh to standard viewer location
+        milo_mesh = Path(milo_result.get("glb_path") or milo_result.get("mesh_path", ""))
+        if milo_mesh.exists():
+            std_mesh_dir = self.job_dir / "objects" / "meshes" / "full_scene"
+            std_mesh_dir.mkdir(parents=True, exist_ok=True)
+            dest = std_mesh_dir / "full_scene.glb"
+            shutil.copy2(str(milo_mesh), str(dest))
+            artifacts["scene_mesh_glb"] = str(dest)
+            logger.info("MILo mesh copied to %s", dest)
+
         return StageResult(
             success=True, stage="train",
             metrics=metrics,

@@ -342,9 +342,10 @@ def serve_mesh(job_id: str) -> Response:
     if output_dir is None or not output_dir.exists():
         abort(404, description="Output directory not found")
 
-    # Prefer Blender-assembled USD GLB (has materials), then raw TSDF GLB
+    # Prefer Blender-assembled USD GLB (has materials), then MILo, then raw TSDF GLB
     glb_candidates = [
         output_dir / "usd" / "scene.glb",  # Blender export
+        output_dir / "model_milo" / "mesh_learnable_sdf.glb",  # MILo mesh
     ]
     # Then look in standard locations
     glb_candidates += sorted(output_dir.glob("objects/meshes/**/*.glb"))
