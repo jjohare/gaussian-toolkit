@@ -27,7 +27,6 @@ LichtFeld Studio is the upstream product. It is a native C++23/CUDA workstation 
 | `tests/` | Upstream test suite |
 | `CMakeLists.txt` | Root build file |
 | `vcpkg.json` | C++ dependency manifest |
-| `README.md` | Upstream README (do not overwrite) |
 | `CONTRIBUTING.md` | Upstream contributing guide |
 | `LICENSE` | GPL-3.0 |
 | `THIRD_PARTY_LICENSES.md` | Upstream third-party notices |
@@ -38,39 +37,46 @@ LichtFeld Studio is the upstream product. It is a native C++23/CUDA workstation 
 
 Everything below is written and maintained by us on the `gaussian-toolkit` branch. Upstream does not contain these directories.
 
-### Pipeline (`src/pipeline/`) -- 24 modules
+### Pipeline (`src/pipeline/`) -- 28 modules
 
 The video-to-structured-3D pipeline. Takes a video file and produces a USD scene with per-object Gaussian and mesh representations.
 
-Core modules: `orchestrator.py`, `cli.py`, `config.py`, `mcp_client.py`, `quality_gates.py`
-Segmentation: `sam2_segmentor.py`, `sam3_segmentor.py`, `sam3d_client.py`, `mask_projector.py`
-Mesh: `mesh_extractor.py`, `mesh_cleaner.py`, `texture_baker.py`, `material_assigner.py`
-Rendering: `multiview_renderer.py`, `hunyuan3d_client.py`, `comfyui_inpainter.py`
-Utilities: `frame_quality.py`, `frame_selector.py`, `coordinate_transform.py`, `colmap_parser.py`, `person_remover.py`
+| Category | Modules |
+|----------|---------|
+| Core | `stages.py`, `orchestrator.py`, `cli.py`, `__main__.py`, `config.py`, `preflight.py`, `__init__.py` |
+| Reconstruction | `colmap_parser.py`, `coordinate_transform.py`, `frame_selector.py`, `frame_quality.py` |
+| Segmentation | `sam2_segmentor.py`, `sam3_segmentor.py`, `sam3d_client.py`, `mask_projector.py` |
+| Mesh extraction | `mesh_extractor.py` (TSDF), `milo_extractor.py` (MILo sidecar), `mesh_cleaner.py` |
+| Texturing | `texture_baker.py`, `material_assigner.py` |
+| Scene assembly | `blender_assembler.py` (Blender + Cycles), `usd_assembler.py` (OpenUSD) |
+| Rendering | `multiview_renderer.py`, `hunyuan3d_client.py`, `comfyui_inpainter.py` |
+| Utilities | `mcp_client.py`, `quality_gates.py`, `person_remover.py` |
 
 ### Web Interface (`src/web/`)
 
-Flask application (port 7860) for video upload, job tracking, and result download. 5 files: `app.py`, `job_manager.py`, `pipeline_runner.py`, `static/`, `templates/`.
+Flask application (port 7860) for video upload, job tracking, log streaming (SSE), 3D preview (model-viewer), and result download. Files: `app.py`, `job_manager.py`, `pipeline_runner.py`, `static/`, `templates/`.
 
 ### Deployment
 
 | File | Purpose |
 |------|---------|
-| `Dockerfile.consolidated` | Single container with all services |
-| `docker-compose.consolidated.yml` | Compose file for the consolidated container |
+| `Dockerfile.consolidated` | Main container (Ubuntu 24.04, CUDA 12.8, Python 3.12) |
+| `docker/Dockerfile.milo` | MILo sidecar container (Ubuntu 22.04, CUDA 11.8, Python 3.10) |
+| `docker-compose.consolidated.yml` | Two-container compose: main + MILo sidecar |
 | `docker/Dockerfile` | Base container (older, superseded) |
 | `docker/docker-compose.yml` | Base compose (older, superseded) |
 | `docker/entrypoint.sh` | Container entry script |
 | `docker/supervisord.conf` | Process manager configuration |
+| `docker/install_milo.sh` | MILo dependency installer |
 | `docker/run_docker.sh` | Launch helper |
 
-**The default deployment story is:** `docker compose -f docker-compose.consolidated.yml up -d`. One container, one command, all services. The older `docker/` files exist for reference but the consolidated approach is canonical.
+**The default deployment story is:** `docker compose -f docker-compose.consolidated.yml up -d`. Two containers (main + MILo sidecar), one command. The MILo sidecar is optional -- if not present, mesh extraction falls back to TSDF.
 
 ### Scripts (`scripts/`)
 
 Pipeline runners, test harnesses, and utilities:
 - `run_gallery_pipeline.py` -- Full gallery pipeline
-- `run_object_separation.py` -- Object extraction (33 objects, 98.3% coverage)
+- `run_object_separation.py` -- Object extraction
 - `run_tsdf_mesh.py` -- TSDF mesh extraction
 - `assemble_gallery_usd.py` -- USD scene assembly
 - `lichtfeld_mcp_bridge.py` -- stdio MCP bridge for Claude Desktop/Codex
@@ -79,19 +85,29 @@ Pipeline runners, test harnesses, and utilities:
 
 ### Research (`research/`)
 
-15 documents covering landscape analysis, pipeline design, component integration, and architecture decisions. This is research context supporting development decisions. It is not product documentation and should not be treated as user-facing.
+Research documents covering landscape analysis, pipeline design, component integration, and architecture decisions. This is research context supporting development decisions. It is not product documentation and should not be treated as user-facing.
 
-### Documentation (`docs/architecture/`, `docs/integration/`, `docs/workflows/`, `docs/troubleshooting/`)
+### Documentation
 
-Architecture overviews, integration guides, and workflow documentation written for the gaussian-toolkit branch.
+| Location | Contents |
+|----------|----------|
+| `docs/architecture.md` | Two-container architecture overview |
+| `docs/engineering-log.md` | Development history and key decisions |
+| `docs/architecture/` | Detailed architecture docs (overview, cluster setup, performance) |
+| `docs/integration/` | Docker, MCP, SplatReady integration guides |
+| `docs/workflows/` | Video capture, video-to-splat, scene cleanup workflows |
+| `docs/troubleshooting/` | Build issues, headless MCP debugging |
+| `docs/renders/` | Pipeline output renders and screenshots |
 
 ### Other Our Files
 
 | File | Purpose |
 |------|---------|
-| `GAUSSIAN_TOOLKIT_README.md` | Authoritative README for the gaussian-toolkit branch |
+| `README.md` | Project README (rewritten for the fork) |
+| `GAUSSIAN_TOOLKIT_README.md` | Extended README with module status table |
 | `BOUNDARIES.md` | This file |
 | `AGENTS.md` | Agent operating guide for MCP-driven workflows |
+| `CLAUDE_CONTAINER.md` | Claude Code instructions inside the container |
 
 ## Experimental
 
@@ -99,12 +115,11 @@ These components are built but not yet validated end-to-end. They may change sig
 
 | Component | Location | Status | Notes |
 |-----------|----------|--------|-------|
-| SAM3 concept segmentation | `src/pipeline/sam3_segmentor.py`, `sam3d_client.py` | Client built, Docker integration pending | Replacing SAM2 grid-point prompts with text+visual concept prompts (4M concepts) |
-| Hunyuan3D 2.0 mesh creation | `src/pipeline/hunyuan3d_client.py` | Client built, per-object workflow untested at scale | Multi-view renders to textured mesh |
-| Texture baking | `src/pipeline/texture_baker.py` | Skeleton written | Depends on clean mesh extraction + xatlas |
-| Material assignment | `src/pipeline/material_assigner.py` | Skeleton written | Depends on texture baking |
-| FLUX background inpainting | `src/pipeline/comfyui_inpainter.py` | Client built, tested on single scenes | ComfyUI workflow dependency |
-| Audio-to-scene-graph naming | Planned (not yet started) | Planned | Extract audio from video, transcribe with Whisper, use transcript to name objects in the USD scene graph |
+| SAM3 concept segmentation | `sam3_segmentor.py`, `sam3d_client.py` | Client built, needs HF_TOKEN | Text+visual concept prompts (4M concepts) |
+| Texture baking | `texture_baker.py` | Skeleton written | Depends on clean mesh + xatlas |
+| Material assignment | `material_assigner.py` | Skeleton written | Depends on texture baking |
+| FLUX background inpainting | `comfyui_inpainter.py` | Client built | ComfyUI workflow dependency |
+| Audio-to-scene-graph naming | Planned (not started) | Planned | Whisper transcription to name USD prims |
 
 ## Decision Framework
 
@@ -116,3 +131,4 @@ When deciding where new code goes:
 4. **Does it change container configuration?** -- Put it in `docker/` or update `Dockerfile.consolidated`.
 5. **Is it a research exploration or literature review?** -- Put it in `research/`.
 6. **Is it a one-off script or test harness?** -- Put it in `scripts/`.
+7. **Does it require CUDA 11.8 or older Python?** -- Put it in the MILo sidecar (`docker/Dockerfile.milo`).

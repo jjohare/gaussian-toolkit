@@ -4,27 +4,32 @@
 
 ## System Overview
 
-Gaussian Toolkit integrates multiple components into a unified 3D Gaussian Splatting pipeline running in a consolidated Docker container on dual RTX 6000 Ada GPUs (96GB total VRAM).
+> See also: [docs/architecture.md](../architecture.md) for the two-container deployment architecture.
+
+Gaussian Toolkit integrates multiple components into a unified 3D Gaussian Splatting pipeline running in two Docker containers on dual RTX 6000 Ada GPUs (96GB total VRAM).
 
 ```
-                     ┌──────────────────────────────────────────────────────┐
-                     │               Gaussian Toolkit                       │
-                     │          Consolidated Docker Container               │
-                     ├──────────────────────────────────────────────────────┤
-  Video Input ──────►│  SplatReady     COLMAP      LichtFeld               │──────► Trained Model
-  Image Folder ─────►│  (frames)  ──► (SfM)  ──► (training)               │──────► PLY/SPZ/USD/HTML
-  COLMAP Dataset ───►│                                                      │──────► Per-Object PLY
-  Web Upload ──────►│  SAM3        Hunyuan3D    ComfyUI                    │──────► Textured Meshes
-   (:7860)          │  (segment) ──► (mesh)  ──► (inpaint)                │──────► USD Scene
-                     │                                                      │
-                     │  Web UI :7860 | ComfyUI :8188 | MCP :45677          │
-                     │  VNC :5901   | Threadripper PRO 48-core             │
-                     │  2x RTX 6000 Ada (96GB VRAM) | 251GB RAM           │
-                     └──────────────────────────────────────────────────────┘
-                                    ▲
-                                    │ lfs-mcp CLI / MCP bridge / Web UI
-                                    ▼
-                            Claude Code / Agents
+┌───────────────────────────────────────────────────────┐
+│  gaussian-toolkit container (GPU 0)                    │
+│  Ubuntu 24.04 / CUDA 12.8 / Python 3.12               │
+├───────────────────────────────────────────────────────┤
+│  COLMAP SfM → LichtFeld 3DGS → SAM3 Segmentation     │
+│  → TSDF Mesh → Blender Assembly → USD Export          │
+│                                                        │
+│  Web UI :7860 | ComfyUI :8188 | MCP :45677            │
+│  VNC :5901   | ttyd :7681                             │
+│  Claude Code (agentic orchestrator)                    │
+└────────────────┬──────────────────────────────────────┘
+                 │ docker exec / shared /data/output
+┌────────────────▼──────────────────────────────────────┐
+│  milo container (GPU 1)                                │
+│  Ubuntu 22.04 / CUDA 11.8 / Python 3.10               │
+│  MILo mesh extraction (SIGGRAPH Asia 2025)             │
+└───────────────────────────────────────────────────────┘
+                 ▲
+                 │ lfs-mcp CLI / MCP bridge / Web UI
+                 ▼
+         Claude Code / Agents
 ```
 
 ## Component Stack
@@ -100,35 +105,41 @@ Claude Agent
     └─► lfs-mcp call scene.export_spz {"path": "output.spz"}
 ```
 
-## Consolidated Docker Architecture
+## Two-Container Docker Architecture
 
-The entire pipeline runs in a single consolidated Docker container:
+The pipeline runs in two Docker containers: a main container for the full pipeline and a MILo sidecar for high-quality mesh extraction.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│           Consolidated Docker Container                   │
-│    Host: 192.168.2.48 (HP-Desktop)                       │
-│    2x RTX 6000 Ada (96GB VRAM) | 251GB RAM               │
-│    Threadripper PRO 48-core                              │
+│  gaussian-toolkit (GPU 0)                                │
+│  Ubuntu 24.04 / CUDA 12.8 / Python 3.12                 │
 ├─────────────────────────────────────────────────────────┤
 │  Services (supervisord):                                  │
 │    Web UI (:7860)        - Flask upload + job manager     │
 │    ComfyUI (:8188)       - SAM3D/TRELLIS nodes           │
 │    LichtFeld MCP (:45677) - 70+ tools                    │
-│    VNC (:5901)           - Remote desktop                │
+│    ttyd (:7681)          - Web terminal (Claude Code)    │
+│    VNC (:5901)           - Remote desktop (Blender)      │
 ├─────────────────────────────────────────────────────────┤
-│  Model Staging:                                           │
-│    /home/john/comfyui-models-staging (128GB)             │
-│    Stage-based VRAM unloading for model rotation         │
-├─────────────────────────────────────────────────────────┤
-│  Pipeline (21 modules):                                   │
-│    orchestrator, sam2_segmentor, sam3d_client,            │
-│    hunyuan3d_client, comfyui_inpainter, mask_projector,  │
-│    mesh_extractor, mesh_cleaner, usd_assembler,          │
+│  Pipeline (28 modules):                                   │
+│    stages, orchestrator, cli, config, preflight,          │
+│    sam2_segmentor, sam3_segmentor, sam3d_client,          │
+│    mask_projector, mesh_extractor, milo_extractor,       │
+│    mesh_cleaner, blender_assembler, usd_assembler,       │
 │    texture_baker, material_assigner, mcp_client,         │
-│    multiview_renderer, quality_gates, config, cli,       │
-│    coordinate_transform, frame_quality, colmap_parser,   │
-│    __init__, __main__                                    │
+│    multiview_renderer, hunyuan3d_client,                 │
+│    comfyui_inpainter, quality_gates, frame_quality,      │
+│    frame_selector, colmap_parser, coordinate_transform,  │
+│    person_remover, __init__, __main__                    │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│  milo (GPU 1) — sidecar, called via docker exec          │
+│  Ubuntu 22.04 / CUDA 11.8 / Python 3.10                 │
+├─────────────────────────────────────────────────────────┤
+│  MILo (SIGGRAPH Asia 2025)                               │
+│  Differentiable mesh-in-the-loop gaussian splatting      │
+│  4 rasterizer variants + nvdiffrast + Delaunay           │
 └─────────────────────────────────────────────────────────┘
 ```
 

@@ -56,3 +56,4 @@ test-data/
 research/gap-analysis-local/
 !docs/renders/*.jpg
 .env
+research/come-paper/

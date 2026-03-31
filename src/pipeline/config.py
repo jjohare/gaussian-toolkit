@@ -50,6 +50,38 @@ class TrainingConfig:
     checkpoint_interval: int = 5000
     mesh_method: str = "tsdf"  # "tsdf" (default), "milo", or "sugar"
 
+    # Scene type preset: "default" or "indoor_reflective"
+    scene_preset: str = "default"
+
+    # Indoor-reflective scene overrides (applied when scene_preset == "indoor_reflective")
+    # These suppress SH overfitting on specular highlights, use MCMC stochastic
+    # relocation for better coverage of reflective surfaces, reduce iterations to
+    # avoid overfitting, and set a white background to match bright gallery walls.
+    indoor_sh_degree: int = 1
+    indoor_strategy: str = "mcmc"
+    indoor_iterations: int = 15000
+    indoor_bg_color: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    indoor_opacity_reg: float = 0.01
+    indoor_scale_reg: float = 0.01
+
+    def resolved_iterations(self) -> int:
+        """Return iteration count, respecting scene preset."""
+        if self.scene_preset == "indoor_reflective":
+            return self.indoor_iterations
+        return self.iterations
+
+    def resolved_strategy(self) -> str:
+        """Return strategy name, respecting scene preset."""
+        if self.scene_preset == "indoor_reflective":
+            return self.indoor_strategy
+        return self.strategy
+
+    def resolved_sh_degree(self) -> int:
+        """Return SH degree, respecting scene preset."""
+        if self.scene_preset == "indoor_reflective":
+            return self.indoor_sh_degree
+        return self.sh_degree
+
 
 @dataclass
 class DecomposeConfig:
@@ -151,7 +183,7 @@ class RetryConfig:
     max_retries: int = 3
     parameter_adjustments: dict[str, dict[str, Any]] = field(default_factory=lambda: {
         "RECONSTRUCT": {"min_scale": 0.25, "matcher": "sequential"},
-        "RECONSTRUCT:2": {"max_image_size": 1500},
+        "RECONSTRUCT:2": {"matcher": "vocab_tree"},
         "QUALITY_GATE_1": {},
         "MESH_OBJECTS": {"max_vertices": 1_000_000},
         "RETRAIN_BG": {"max_iterations": 50000},

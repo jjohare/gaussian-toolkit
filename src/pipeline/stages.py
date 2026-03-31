@@ -604,18 +604,45 @@ class PipelineStages:
                 error=f"LichtFeld binary not found at {lfs_binary}",
             )
 
-        strategy = self.config.training.strategy
-        sh_degree = self.config.training.sh_degree
+        strategy = self.config.training.resolved_strategy()
+        sh_degree = self.config.training.resolved_sh_degree()
+        effective_iters = self.config.training.resolved_iterations()
+        # Caller-supplied iterations override only for default preset
+        if self.config.training.scene_preset == "default" and iterations != 30000:
+            effective_iters = iterations
 
         train_cmd = [
             lfs_binary, "--headless",
             "--data-path", str(dataset_dir),
             "--output-path", str(model_dir),
-            "--iter", str(iterations),
+            "--iter", str(effective_iters),
             "--strategy", strategy,
             "--sh-degree", str(sh_degree),
             "--log-level", "info",
         ]
+
+        # Indoor-reflective preset: write a config JSON with bg_color and
+        # regularization overrides that cannot be set via CLI flags alone.
+        indoor_config_path = None
+        if self.config.training.scene_preset == "indoor_reflective":
+            indoor_config_path = model_dir / "_indoor_overrides.json"
+            bg = self.config.training.indoor_bg_color
+            indoor_overrides = {
+                "sh_degree": sh_degree,
+                "strategy": strategy,
+                "iterations": effective_iters,
+                "opacity_reg": self.config.training.indoor_opacity_reg,
+                "scale_reg": self.config.training.indoor_scale_reg,
+                "bg_color": list(bg),
+                "bg_modulation": False,
+                "mip_filter": True,
+            }
+            indoor_config_path.write_text(
+                json.dumps(indoor_overrides, indent=2), encoding="utf-8",
+            )
+            train_cmd.extend(["--config", str(indoor_config_path)])
+            train_cmd.append("--enable-mip")
+
         logger.info("Training: %s", " ".join(train_cmd))
 
         try:
@@ -646,8 +673,10 @@ class PipelineStages:
             metrics={
                 "ply_path": str(ply_path),
                 "ply_size_mb": round(ply_size_mb, 1),
-                "iterations": iterations,
+                "iterations": effective_iters,
                 "strategy": strategy,
+                "sh_degree": sh_degree,
+                "scene_preset": self.config.training.scene_preset,
             },
             artifacts={"ply_path": str(ply_path), "model_dir": str(model_dir)},
         )
